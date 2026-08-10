@@ -13,9 +13,6 @@ glossary, the "why does this equation exist" intuition, a visualization, a worki
 implementation, an equivalent R implementation, numerical verification, and practice problems
 with worked solutions.
 
-The goal stated by the repo owner: understand every idea *deeply enough to teach it to a
-10-year-old* — not just get through the book.
-
 ## Learning Objectives
 
 By working through this repository you should be able to:
@@ -141,10 +138,6 @@ way rather than papered over.
 | 4 | 4.3 epidemic parameter estimation | ✅ done |
 | 5 | 5.1 SEIR models | ✅ done |
 | 5 | 5.2 in-host models, backward bifurcation | ✅ done |
-
-See `docs/PROGRESS.md` for the working log. This repository is built **one subsection at a
-time**, in order, to keep quality and cross-chapter consistency high — see
-`docs/WORKFLOW_NOTE.md` for why.
 
 ## Dependencies
 
