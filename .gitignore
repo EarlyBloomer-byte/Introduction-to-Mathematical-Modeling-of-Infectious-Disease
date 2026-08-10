@@ -21,3 +21,4 @@ Thumbs.db
 # Outputs that should be regenerated, not committed
 *.html
 !docs/*.html
+docs/
