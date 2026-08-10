@@ -1,0 +1,137 @@
+---
+title: "Chapter 2, Section 2.5 — Ross–MacDonald Model for Malaria: A Monotone System"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 68–75. Companion to `../../python/chapter_02/section_2_5.ipynb` —
+full prose (rewrite, ELI10, key ideas, all derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R.
+
+---
+
+## Block 2 — Simulating both sides of the R0 threshold
+
+```{r ross-macdonald-sim, fig.width=12, fig.height=5}
+ross_macdonald <- function(t, state, parms) {
+  x <- state["x"]; y <- state["y"]
+  a <- parms["a"]; m <- parms["m"]; b1 <- parms["b1"]; b2 <- parms["b2"]
+  gamma1 <- parms["gamma1"]; gamma2 <- parms["gamma2"]
+  dx <- a*m*b1*y*(1-x) - gamma1*x
+  dy <- a*b2*x*(1-y) - gamma2*y
+  list(c(dx, dy))
+}
+
+a_param <- 0.3; b1 <- 0.5; b2 <- 0.3
+gamma1 <- 0.1; gamma2 <- 0.05
+
+starts <- list(c(0.05,0.05), c(0.5,0.1), c(0.1,0.5), c(0.8,0.8), c(0.9,0.05))
+
+simulate_m <- function(m_param, t_max=300) {
+  purrr::map_dfr(seq_along(starts), function(i) {
+    st <- starts[[i]]
+    out <- as.data.frame(ode(y = c(x = st[1], y = st[2]), times = seq(0, t_max, length.out = 600),
+                               func = ross_macdonald,
+                               parms = c(a=a_param, m=m_param, b1=b1, b2=b2, gamma1=gamma1, gamma2=gamma2),
+                               method = "lsoda"))
+    out$traj <- i
+    out
+  })
+}
+
+for (m_param in c(0.3, 6.0)) {
+  R0 <- a_param^2 * m_param * b1 * b2 / (gamma1 * gamma2)
+  cat(sprintf("m=%.1f: R0 = %.3f\n", m_param, R0))
+}
+
+traj_below <- simulate_m(0.3, t_max=3000)  # R0<1 decays slowly near origin, needs more time
+traj_above <- simulate_m(6.0)
+
+R0_below <- a_param^2 * 0.3 * b1 * b2 / (gamma1*gamma2)
+R0_above <- a_param^2 * 6.0 * b1 * b2 / (gamma1*gamma2)
+
+p1 <- ggplot(traj_below, aes(x, y, group = traj)) +
+  geom_path(alpha = 0.8) +
+  annotate("point", x = 0, y = 0, color = "#3c763d", shape = 8, size = 5) +
+  coord_cartesian(xlim = c(0,1), ylim = c(0,1)) +
+  labs(title = sprintf("R0=%.2f < 1: all orbits -> P0=(0,0)", R0_below)) + theme_minimal()
+
+m_above <- 6.0
+x_star <- (a_param^2*m_above*b1*b2 - gamma1*gamma2) / (a_param*b2*(a_param*m_above*b1 + gamma1))
+y_star <- (a_param^2*m_above*b1*b2 - gamma1*gamma2) / (a_param*m_above*b1*(a_param*b2 + gamma2))
+
+p2 <- ggplot(traj_above, aes(x, y, group = traj)) +
+  geom_path(alpha = 0.8) +
+  annotate("point", x = x_star, y = y_star, color = "#3c763d", shape = 8, size = 5) +
+  coord_cartesian(xlim = c(0,1), ylim = c(0,1)) +
+  labs(title = sprintf("R0=%.2f > 1: all orbits -> P*=(%.3f,%.3f)", R0_above, x_star, y_star)) +
+  theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2,
+  top = "Ross-MacDonald model: global convergence on both sides of R0=1")
+ggsave("../../chapter_02/images/ross_macdonald_phase_portraits_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, ncol = 2), width = 12, height = 5, dpi = 130)
+```
+
+## Block 3 — Metzler property and strict sublinearity, checked numerically
+
+```{r monotone-checks}
+set.seed(0)
+
+jacobian_rm <- function(x, y, a, m, b1, b2, gamma1, gamma2) {
+  J11 <- -gamma1 - a*m*b1*y
+  J12 <- a*m*b1*(1-x)
+  J21 <- a*b2*(1-y)
+  J22 <- -gamma2 - a*b2*x
+  matrix(c(J11, J21, J12, J22), nrow = 2)
+}
+
+metzler_violations <- 0
+for (k in 1:2000) {
+  x <- runif(1); y <- runif(1)
+  J <- jacobian_rm(x, y, a_param, 4.0, b1, b2, gamma1, gamma2)
+  if (J[1,2] < 0 || J[2,1] < 0) metzler_violations <- metzler_violations + 1
+}
+cat(sprintf("Metzler property: %d violations out of 2000 random points in Gamma\n", metzler_violations))
+
+P_field <- function(x, y, a, m, b1, gamma1) a*m*b1*y*(1-x) - gamma1*x
+Q_field <- function(x, y, a, b2, gamma2) a*b2*x*(1-y) - gamma2*y
+
+sublinear_violations <- 0
+for (k in 1:2000) {
+  x <- runif(1, 0.001, 0.999); y <- runif(1, 0.001, 0.999); lam <- runif(1, 0.01, 0.99)
+  P_scaled <- P_field(lam*x, lam*y, a_param, 4.0, b1, gamma1)
+  P_lam_times <- lam * P_field(x, y, a_param, 4.0, b1, gamma1)
+  Q_scaled <- Q_field(lam*x, lam*y, a_param, b2, gamma2)
+  Q_lam_times <- lam * Q_field(x, y, a_param, b2, gamma2)
+  if (P_scaled <= P_lam_times || Q_scaled <= Q_lam_times) sublinear_violations <- sublinear_violations + 1
+}
+cat(sprintf("Strict sublinearity: %d violations out of 2000 random (x,y,lambda) triples\n", sublinear_violations))
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_02/section_2_5.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_02/exercises/section_2_5_exercises.md`; solutions:
+`../../chapter_02/solutions/section_2_5_solutions.md`.*
+
+---
+
+# Chapter 2 Complete
+
+All five classic epidemic models are now built, analyzed, and verified in both Python and R.

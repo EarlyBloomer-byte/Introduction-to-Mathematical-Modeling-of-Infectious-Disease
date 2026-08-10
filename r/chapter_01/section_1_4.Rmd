@@ -1,0 +1,273 @@
+---
+title: "Chapter 1, Section 1.4 — Important Concepts in Compartmental Epidemic Models"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 11–29. Companion to `../../python/chapter_01/section_1_4.ipynb` —
+full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to that
+notebook; this file reproduces the four blocks' code in R.
+
+---
+
+## Block 1 (§1.4.1) — Exponential residence time: mean and memorylessness
+
+```{r exp-distribution-checks}
+# R lacks a convenient symbolic engine for the general derivation (see the Python
+# notebook's sympy version for the fully symbolic proof); here we verify the
+# SAME three claims numerically/via base R calculus utilities.
+r_rate <- 0.2
+
+f <- function(t, r) r * exp(-r * t)
+
+# (1) integrates to 1
+total_prob <- integrate(f, lower = 0, upper = Inf, r = r_rate)$value
+cat("Integral of f(t):", total_prob, "\n")
+
+# (2) mean = 1/r
+mean_X <- integrate(function(t) t * f(t, r_rate), lower = 0, upper = Inf)$value
+cat(sprintf("E[X] = %.6f  (should equal 1/r = %.6f)\n", mean_X, 1 / r_rate))
+
+# (3) memoryless property, checked numerically at a few (s, t) pairs
+G <- function(t, r) exp(-r * t)
+for (s in c(1, 5, 10)) {
+  for (t in c(1, 3, 7)) {
+    lhs <- G(s + t, r_rate) / G(s, r_rate)
+    rhs <- G(t, r_rate)
+    cat(sprintf("s=%2d, t=%2d: G(s+t)/G(s) - G(t) = %.10f\n", s, t, lhs - rhs))
+  }
+}
+```
+
+## Block 1 continued — ODE vs. DDE residence-time comparison
+
+```{r ode-vs-dde, fig.width=9, fig.height=4.5}
+lambda_ <- 0.0005
+gamma_ <- 0.2
+S0 <- 550; I0 <- 5
+t_max <- 120
+
+# (A) ODE version, via deSolve
+kmk <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]
+  dS <- -parms["lambda_"] * I * S
+  dI <- parms["lambda_"] * I * S - parms["gamma_"] * I
+  list(c(dS, dI))
+}
+t_eval <- seq(0, t_max, length.out = 600)
+sol_ode <- ode(y = c(S = S0, I = I0), times = t_eval, func = kmk,
+                parms = c(lambda_ = lambda_, gamma_ = gamma_), method = "lsoda")
+sol_ode <- as.data.frame(sol_ode)
+
+# (B) DDE version via a windowed-sum (rectangle-rule integral) formulation --
+# mirrors the Python notebook's stable implementation exactly (a naive
+# difference-equation version of this DDE is numerically unstable; see the
+# Python notebook's comments for why).
+omega <- 1 / gamma_
+dt <- 0.02
+n_steps <- as.integer(t_max / dt)
+history_len <- as.integer(round(omega / dt))
+
+S_dde <- numeric(n_steps + 1); I_dde <- numeric(n_steps + 1)
+S_dde[1] <- S0; I_dde[1] <- I0
+queue <- numeric(0)
+
+for (k in seq_len(n_steps)) {
+  Sk <- S_dde[k]; Ik <- I_dde[k]
+  inc_now <- lambda_ * Ik * Sk
+  packet <- inc_now * dt
+  queue <- c(queue, packet)
+
+  outflow <- 0
+  while (length(queue) > history_len) {
+    outflow <- outflow + queue[1]
+    queue <- queue[-1]
+  }
+
+  S_dde[k + 1] <- max(Sk - inc_now * dt, 0)
+  I_dde[k + 1] <- max(Ik + packet - outflow, 0)
+}
+t_dde <- seq(0, t_max, length.out = n_steps + 1)
+
+plot_df <- bind_rows(
+  tibble(t = sol_ode$time, I = sol_ode$I, type = "exponential residence time (ODE)"),
+  tibble(t = t_dde, I = I_dde, type = sprintf("fixed residence time omega=%.0f (DDE)", omega))
+)
+
+ggplot(plot_df, aes(x = t, y = I, color = type, linetype = type)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Same mean infectious period, two different residence-time distributions",
+       x = "time", y = "I(t)") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/ode_vs_dde_residence_time_R.png", width = 9, height = 4.5, dpi = 130)
+
+cat(sprintf("Peak I(t), exponential (ODE): %.2f\n", max(sol_ode$I)))
+cat(sprintf("Peak I(t), fixed omega (DDE): %.2f\n", max(I_dde)))
+```
+
+## Block 2 (§1.4.2) — Comparing incidence functional forms
+
+```{r incidence-forms, fig.width=8.5, fig.height=5}
+I_grid <- seq(0, 500, length.out = 300)
+S_fixed <- 800
+beta <- 0.0005
+lam <- 0.4
+N_fixed <- 1500
+K <- 100
+
+incidence_df <- tibble(
+  I = I_grid,
+  mass_action = beta * I_grid * S_fixed,
+  saturating = beta * I_grid * S_fixed / (K + I_grid),
+  standard = lam * I_grid * S_fixed / N_fixed
+) %>%
+  pivot_longer(-I, names_to = "form", values_to = "rate")
+
+ggplot(incidence_df, aes(x = I, y = rate, color = form)) +
+  geom_line(linewidth = 1) +
+  labs(title = sprintf("Comparing incidence functional forms (S=%d fixed)", S_fixed),
+       x = "I (number infectious)", y = "incidence rate") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/incidence_forms_comparison_R.png", width = 8.5, height = 5, dpi = 130)
+
+cat("As I grows large, saturating incidence approaches beta*S =", beta * S_fixed, "\n")
+```
+
+## Block 3 (§1.4.3) — Demography and logistic growth
+
+```{r demography, fig.width=14, fig.height=4}
+sir_demography <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  N <- S + I + R
+  b <- parms["b"]; d1 <- parms["d1"]; d2 <- parms["d2"]; d3 <- parms["d3"]
+  lam <- parms["lam"]; gamma_ <- parms["gamma_"]
+  dS <- b*N - lam*I*S - d1*S
+  dI <- lam*I*S - (gamma_ + d2)*I
+  dR <- gamma_*I - d3*R
+  list(c(dS, dI, dR))
+}
+
+t_eval2 <- seq(0, 200, length.out = 500)
+cases <- list(
+  list(label = "b > d (growing)", b = 0.02, d = 0.01),
+  list(label = "b < d (shrinking)", b = 0.01, d = 0.02),
+  list(label = "b = d (constant N)", b = 0.015, d = 0.015)
+)
+
+demo_results <- purrr::map_dfr(cases, function(cs) {
+  parms <- c(b = cs$b, d1 = cs$d, d2 = cs$d, d3 = cs$d, lam = lambda_, gamma_ = gamma_)
+  out <- as.data.frame(ode(y = c(S = S0, I = I0, R = 0), times = t_eval2,
+                             func = sir_demography, parms = parms, method = "lsoda"))
+  out$N <- out$S + out$I + out$R
+  out$label <- cs$label
+  out
+})
+
+ggplot(demo_results, aes(x = time)) +
+  geom_line(aes(y = N, color = "N(t)")) +
+  geom_line(aes(y = I, color = "I(t)")) +
+  facet_wrap(~label, scales = "free_y") +
+  labs(title = "Demographic SIR model: equal death rates -> exponential N(t)",
+       x = "time", y = "count", color = "") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/demography_sir_cases_R.png", width = 14, height = 4, dpi = 130)
+
+# Verification against closed-form N0*exp((b-d)t)
+grow_case <- demo_results %>% filter(label == "b > d (growing)")
+N_closed_form <- (S0 + I0) * exp((0.02 - 0.01) * grow_case$time)
+max_rel_error <- max(abs(grow_case$N - N_closed_form) / N_closed_form)
+cat(sprintf("Max relative error vs closed-form N0*exp((b-d)t): %.2e\n", max_rel_error))
+```
+
+```{r logistic-growth, fig.width=8, fig.height=4.5}
+sir_logistic <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  N <- S + I + R
+  b <- parms["b"]; d <- parms["d"]; K <- parms["K"]; lam <- parms["lam"]; gamma_ <- parms["gamma_"]
+  dS <- b*N - (N^2)/K - lam*I*S - d*S
+  dI <- lam*I*S - (gamma_ + d)*I
+  dR <- gamma_*I - d*R
+  list(c(dS, dI, dR))
+}
+
+b <- 0.05; d <- 0.01; K <- 2000
+t_eval3 <- seq(0, 300, length.out = 600)
+sol_log <- as.data.frame(ode(y = c(S = S0, I = I0, R = 0), times = t_eval3,
+                               func = sir_logistic, parms = c(b = b, d = d, K = K, lam = lambda_, gamma_ = gamma_),
+                               method = "lsoda"))
+sol_log$N <- sol_log$S + sol_log$I + sol_log$R
+carrying_capacity <- (b - d) * K
+
+ggplot(sol_log, aes(x = time, y = N)) +
+  geom_line(color = "#31708f") +
+  geom_hline(yintercept = carrying_capacity, linetype = "dashed", color = "grey40") +
+  labs(title = "Logistic population growth approaches (b-d)K",
+       x = "time", y = "N(t)") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/logistic_growth_carrying_capacity_R.png", width = 8, height = 4.5, dpi = 130)
+
+cat(sprintf("Final simulated N(t_end) = %.1f, predicted carrying capacity (b-d)K = %.1f\n",
+            tail(sol_log$N, 1), carrying_capacity))
+```
+
+## Block 4 (§1.4.4) — SEIR preview
+
+```{r seir-preview, fig.width=9, fig.height=4.5}
+seir <- function(t, y, parms) {
+  S <- y["S"]; E <- y["E"]; I <- y["I"]; R <- y["R"]
+  lam <- parms["lam"]; kappa <- parms["kappa"]; gamma_ <- parms["gamma_"]
+  dS <- -lam*I*S
+  dE <- lam*I*S - kappa*E
+  dI <- kappa*E - gamma_*I
+  dR <- gamma_*I
+  list(c(dS, dE, dI, dR))
+}
+
+kappa <- 0.15
+t_eval4 <- seq(0, 150, length.out = 600)
+sol_seir <- as.data.frame(ode(y = c(S = S0, E = 0, I = I0, R = 0), times = t_eval4,
+                                func = seir, parms = c(lam = lambda_, kappa = kappa, gamma_ = gamma_),
+                                method = "lsoda"))
+
+seir_long <- sol_seir %>% pivot_longer(cols = c("S", "E", "I", "R"), names_to = "compartment", values_to = "count")
+
+ggplot(seir_long, aes(x = time, y = count, color = compartment)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = c(S = "#31708f", E = "#dca61a", I = "#a94442", R = "#3c763d")) +
+  labs(title = sprintf("SEIR preview: mean latent period = %.1f", 1/kappa),
+       x = "time", y = "count") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/seir_preview_R.png", width = 9, height = 4.5, dpi = 130)
+
+N_vals <- sol_seir$S + sol_seir$E + sol_seir$I + sol_seir$R
+cat(sprintf("N(0)=%.4f, N(t_end)=%.4f, max deviation=%.2e\n", N_vals[1], tail(N_vals,1), max(abs(N_vals - N_vals[1]))))
+peak_E_time <- sol_seir$time[which.max(sol_seir$E)]
+peak_I_time <- sol_seir$time[which.max(sol_seir$I)]
+cat(sprintf("Peak E(t) at t=%.1f, peak I(t) at t=%.1f\n", peak_E_time, peak_I_time))
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_01/section_1_4.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_01/exercises/section_1_4_exercises.md`; solutions:
+`../../chapter_01/solutions/section_1_4_solutions.md`.*

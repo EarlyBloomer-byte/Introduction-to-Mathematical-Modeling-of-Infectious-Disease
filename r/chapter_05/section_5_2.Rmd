@@ -1,0 +1,176 @@
+---
+title: "Chapter 5, Section 5.2 — In-host Models and Backward Bifurcation"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 136–146. Companion to `../../python/chapter_05/section_5_2.ipynb`
+— full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R. As in the Python notebook, every quantitative
+claim here is verified numerically (root-finding, eigenvalues, simulation) rather than relying on
+a hand-copied closed-form formula for the bifurcation thresholds.
+
+---
+
+## Block 1 — Feasible region
+
+```{r feasible-region}
+lam <- 8.938; K <- 1405.3
+nu1 <- 0.285; nu2 <- 0.866
+mu1 <- 0.126; mu2 <- 0.484
+beta <- 0.000862
+
+nu_max <- max(nu1, nu2); mu_min <- min(mu1, mu2)
+coeffs <- c(-nu_max/K, (nu_max-mu_min), lam)
+roots_N <- polyroot(rev(coeffs))
+N_bar <- max(Re(roots_N)[abs(Im(roots_N)) < 1e-9 & Re(roots_N) > 0])
+cat(sprintf("Feasible region bound N_bar = %.3f\n", N_bar))
+
+inhost_model <- function(t, state, parms) {
+  x <- max(state["x"], 0); y <- max(state["y"], 0)
+  sigma <- parms["sigma"]
+  dx <- lam + nu1*x*(1-(x+y)/K) - mu1*x - beta*x*y
+  dy <- sigma*beta*x*y + nu2*y*(1-(x+y)/K) - mu2*y
+  list(c(dx, dy))
+}
+
+for (pt in list(c(10,5), c(500,300), c(50,900), c(1,1))) {
+  if (sum(pt) > N_bar) next
+  out <- ode(y = c(x=pt[1], y=pt[2]), times = seq(0,500,length.out=500),
+             func = inhost_model, parms = c(sigma=0.5), method = "lsoda")
+  max_N <- max(out[,"x"] + out[,"y"])
+  cat(sprintf("start=(%g,%g): max(x+y) = %.3f (bound N_bar=%.3f)\n", pt[1], pt[2], max_N, N_bar))
+}
+```
+
+## Block 2 — Locating the bifurcation numerically
+
+```{r bifurcation-count, fig.width=8, fig.height=4.5}
+g_of_x <- function(x, sigma) (lam + (nu1/nu2)*x*(mu2 - sigma*beta*x) - mu1*x) / (beta*x)
+h_of_x <- function(x, sigma) K*(1 - (mu2 - sigma*beta*x)/nu2) - x
+
+chronic_equilibria <- function(sigma, n = 6000) {
+  xs <- seq(1, K, length.out = n)
+  diffs <- g_of_x(xs, sigma) - h_of_x(xs, sigma)
+  roots <- list()
+  for (i in 1:(length(xs)-1)) {
+    if (is.finite(diffs[i]) && is.finite(diffs[i+1]) && sign(diffs[i]) != sign(diffs[i+1])) {
+      r <- uniroot(function(xx) g_of_x(xx, sigma) - h_of_x(xx, sigma), c(xs[i], xs[i+1]))$root
+      yv <- h_of_x(r, sigma)
+      if (yv > 0.01) roots[[length(roots)+1]] <- c(r, yv)
+    }
+  }
+  roots
+}
+
+sigma_grid <- seq(0, 0.4, length.out = 60)
+counts <- sapply(sigma_grid, function(s) length(chronic_equilibria(s)))
+
+ggplot(tibble(sigma=sigma_grid, count=counts), aes(sigma, count)) +
+  geom_point(color = "#31708f") + geom_line(color = "#31708f") +
+  scale_y_continuous(breaks = c(0,1,2)) +
+  labs(title = "Chronic-equilibrium count vs. sigma (located numerically)", x = TeX("$\\sigma$")) +
+  theme_minimal()
+
+ggsave("../../chapter_05/images/backward_bifurcation_count_R.png", width = 8, height = 4.5, dpi = 130)
+
+# Bisect for sigma_c
+lo <- 0.15; hi <- 0.25
+for (i in 1:40) {
+  mid <- (lo+hi)/2
+  if (length(chronic_equilibria(mid)) >= 2) lo <- mid else hi <- mid
+}
+cat(sprintf("sigma_c (numerically located) ~= %.5f\n", (lo+hi)/2))
+```
+
+## Block 3 — Bistability
+
+```{r bistability, fig.width=8, fig.height=6.5}
+jacobian_ih <- function(x, y, sigma) {
+  dPdx <- nu1*(1-(2*x+y)/K) - mu1 - beta*y
+  dPdy <- -nu1*x/K - beta*x
+  dQdx <- sigma*beta*y - nu2*y/K
+  dQdy <- sigma*beta*x + nu2*(1-(x+2*y)/K) - mu2
+  matrix(c(dPdx, dQdx, dPdy, dQdy), nrow=2)
+}
+is_stable_ih <- function(x, y, sigma) {
+  eig <- eigen(jacobian_ih(x,y,sigma), only.values=TRUE)$values
+  list(stable = all(Re(eig) < 0), eig = eig)
+}
+
+sigma_test <- 0.1
+coeffs_f1 <- c(-nu1/K, (nu1-mu1), lam)
+roots_x0 <- polyroot(rev(coeffs_f1))
+x0 <- max(Re(roots_x0)[Re(roots_x0) > 0])
+R0 <- (1/mu2) * (sigma_test*beta*x0 + nu2*(1 - x0/K))
+cat(sprintf("Testing sigma=%.2f, R0=%.4f (< 1)\n", sigma_test, R0))
+
+res0 <- is_stable_ih(x0, 0, sigma_test)
+cat(sprintf("P0=(%.2f,0): stable=%s\n", x0, res0$stable))
+
+for (eq in chronic_equilibria(sigma_test)) {
+  res <- is_stable_ih(eq[1], eq[2], sigma_test)
+  cat(sprintf("Chronic equilibrium (%.2f,%.2f): stable=%s\n", eq[1], eq[2], res$stable))
+}
+
+starts <- list(c(830,2), c(700,50), c(500,150), c(300,300), c(100,500), c(50,650), c(18,610), c(200,20))
+traj_list <- list()
+for (i in seq_along(starts)) {
+  pt <- starts[[i]]
+  out <- as.data.frame(ode(y = c(x=pt[1], y=pt[2]), times = seq(0,3000,length.out=2000),
+                             func = inhost_model, parms = c(sigma=sigma_test), method = "lsoda"))
+  out$traj <- i
+  traj_list[[i]] <- out
+  cat(sprintf("start=(%g,%g) -> final=(%.2f,%.2f)\n", pt[1], pt[2], tail(out$x,1), tail(out$y,1)))
+}
+traj_df <- bind_rows(traj_list)
+
+ggplot(traj_df, aes(x, y, group = traj)) +
+  geom_path(alpha = 0.8) +
+  annotate("point", x = x0, y = 0, color = "#3c763d", shape = 8, size = 5) +
+  labs(title = sprintf("Bistability at sigma=%.1f (R0=%.3f < 1)", sigma_test, R0)) +
+  theme_minimal()
+
+ggsave("../../chapter_05/images/backward_bifurcation_bistability_R.png", width = 8, height = 6.5, dpi = 130)
+```
+
+## Block 4 — Dulac's criterion (numerical sign check, mirroring the Python symbolic proof)
+
+```{r dulac}
+# R's symbolic tools are less convenient here; the Python notebook gives the
+# full symbolic derivation. We confirm the same conclusion numerically: the
+# Dulac expression -lambda/(x^2*y) - nu1/(K*y) - nu2/(K*x) is negative
+# everywhere it's evaluated.
+dulac_expr <- function(x, y) -lam/(x^2*y) - nu1/(K*y) - nu2/(K*x)
+test_pts <- expand.grid(x = seq(10, K, length.out=20), y = seq(10, K, length.out=20))
+vals <- mapply(dulac_expr, test_pts$x, test_pts$y)
+cat(sprintf("Dulac expression: max value on grid = %.6f (should be < 0)\n", max(vals)))
+cat(sprintf("All negative? %s\n", all(vals < 0)))
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_05/section_5_2.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_05/exercises/section_5_2_exercises.md`; solutions:
+`../../chapter_05/solutions/section_5_2_solutions.md`.*
+
+---
+
+# Chapter 5 Complete — and the Book Is Complete
+
+This closes Chapter 5, and with it, the entire textbook.

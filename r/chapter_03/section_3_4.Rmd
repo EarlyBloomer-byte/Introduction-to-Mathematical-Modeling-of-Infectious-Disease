@@ -1,0 +1,120 @@
+---
+title: "Chapter 3, Section 3.4 — Stability of Periodic Solutions: The Floquet Theory"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 84–87. Companion to `../../python/chapter_03/section_3_4.ipynb` —
+full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to that
+notebook; this file reproduces the code in R.
+
+---
+
+## Block 1 — Pendulum phase drift
+
+```{r pendulum, fig.width=12, fig.height=5}
+pendulum <- function(t, y, parms) {
+  x <- y["x"]; v <- y["v"]
+  list(c(v, -sin(x)))
+}
+
+t_eval <- seq(0, 60, length.out = 3000)
+sol_p <- as.data.frame(ode(y = c(x=0.5, v=0), times = t_eval, func = pendulum, parms = c(), method="lsoda"))
+sol_q <- as.data.frame(ode(y = c(x=0.7, v=0), times = t_eval, func = pendulum, parms = c(), method="lsoda"))
+
+p1 <- ggplot() +
+  geom_path(data = sol_p, aes(x, v, color = "p(t): amplitude 0.5")) +
+  geom_path(data = sol_q, aes(x, v, color = "q(t): amplitude 0.7")) +
+  labs(title = "The two orbits stay close together forever", color = "") + theme_minimal()
+
+pointwise_distance <- sqrt((sol_p$x - sol_q$x)^2 + (sol_p$v - sol_q$v)^2)
+p2 <- ggplot(tibble(t = t_eval, d = pointwise_distance), aes(t, d)) +
+  geom_line(color = "#a94442") +
+  labs(title = "...but |p(t)-q(t)| grows large periodically (phase drift)",
+       x = "time", y = "|p(t)-q(t)|") + theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+ggsave("../../chapter_03/images/pendulum_orbital_stability_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, ncol = 2), width = 12, height = 5, dpi = 130)
+
+cat(sprintf("Max pointwise distance: %.4f (started at %.4f)\n", max(pointwise_distance), pointwise_distance[1]))
+```
+
+## Block 2 — Floquet multipliers for the exact r'=r(1-r^2) limit cycle
+
+```{r floquet, fig.width=6.5, fig.height=6.5}
+jacobian_at <- function(x, y) {
+  r2 <- x^2 + y^2
+  df1_dx <- 1 - (r2 + x*2*x)
+  df1_dy <- -1 - x*2*y
+  df2_dx <- 1 - y*2*x
+  df2_dy <- 1 - (r2 + y*2*y)
+  matrix(c(df1_dx, df2_dx, df1_dy, df2_dy), nrow = 2)
+}
+
+linearized_rhs <- function(t, Y_flat, parms) {
+  Y <- matrix(Y_flat, nrow = 2)
+  x <- cos(t); y <- sin(t)
+  J <- jacobian_at(x, y)
+  dY <- J %*% Y
+  list(as.vector(dY))
+}
+
+Tperiod <- 2*pi
+sol <- ode(y = as.vector(diag(2)), times = c(0, Tperiod), func = linearized_rhs, parms = c(), method = "lsoda",
+           rtol = 1e-12, atol = 1e-12)
+monodromy <- matrix(sol[2, -1], nrow = 2)
+cat("Monodromy matrix Y(T):\n"); print(monodromy)
+
+floquet_multipliers <- eigen(monodromy, only.values = TRUE)$values
+cat("\nFloquet multipliers:", floquet_multipliers, "\n")
+cat("Moduli:", Mod(floquet_multipliers), "\n")
+
+# Direct confirmation: trajectories spiral onto the unit circle
+full_system <- function(t, y, parms) {
+  x <- y["x"]; yy <- y["y"]
+  r2 <- x^2 + yy^2
+  list(c(x - yy - x*r2, x + yy - yy*r2))
+}
+
+theta <- seq(0, 2*pi, length.out = 200)
+circle_df <- tibble(x = cos(theta), y = sin(theta))
+
+starts <- list(c(0.1,0), c(2.5,0), c(0,1.8), c(-1.5,-1.5))
+traj_df <- purrr::map_dfr(seq_along(starts), function(i) {
+  st <- starts[[i]]
+  out <- as.data.frame(ode(y = c(x=st[1], y=st[2]), times = seq(0, 15, length.out = 1500),
+                             func = full_system, parms = c(), method = "lsoda"))
+  out$traj <- i
+  out
+})
+
+p3 <- ggplot() +
+  geom_path(data = circle_df, aes(x, y), color = "black", linewidth = 1) +
+  geom_path(data = traj_df, aes(x, y, group = traj), alpha = 0.7) +
+  coord_equal() +
+  labs(title = "Trajectories spiraling onto the limit cycle") + theme_minimal()
+print(p3)
+ggsave("../../chapter_03/images/limit_cycle_convergence_R.png", plot = p3, width = 6.5, height = 6.5, dpi = 130)
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_03/section_3_4.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_03/exercises/section_3_4_exercises.md`; solutions:
+`../../chapter_03/solutions/section_3_4_solutions.md`.*

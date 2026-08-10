@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+*.egg-info/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/staging/
+renv/python/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Outputs that should be regenerated, not committed
+*.html
+!docs/*.html

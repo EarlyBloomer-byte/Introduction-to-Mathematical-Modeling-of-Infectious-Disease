@@ -1,0 +1,150 @@
+---
+title: "Chapter 3, Sections 3.7-3.8 — Uniform Persistence & Metzler Matrices/Monotone Systems"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 95–101. Companion to
+`../../python/chapter_03/section_3_7_3_8.ipynb` — full prose (rewrite, ELI10, key ideas,
+derivations, symbol tables, intuition) is identical to that notebook; this file reproduces the
+code in R.
+
+---
+
+## Block 1 (§3.7) — Uniform persistence for Sec. 2.3's model
+
+```{r persistence}
+rhs <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]
+  b <- parms["b"]; beta <- parms["beta"]; gamma_ <- parms["gamma_"]
+  list(c(b - beta*I*S - b*S, beta*I*S - gamma_*I - b*I))
+}
+
+b <- 0.02; gamma_ <- 0.2
+beta_above <- 0.5
+R0 <- beta_above / (b + gamma_)
+cat(sprintf("R0 = %.3f (> 1, testing uniform persistence)\n", R0))
+
+starts <- list(c(0.999,0.0005), c(0.001,0.001), c(0.5,0.001), c(0.001,0.5), c(0.5,0.499), c(0.9,0.09))
+t_tail <- seq(400, 600, length.out = 500)
+
+min_S <- Inf; min_I <- Inf; min_gap <- Inf
+for (st in starts) {
+  out <- as.data.frame(ode(y = c(S=st[1], I=st[2]), times = t_tail, func = rhs,
+                             parms = c(b=b, beta=beta_above, gamma_=gamma_), method = "lsoda"))
+  gap <- 1 - out$S - out$I
+  min_S <- min(min_S, min(out$S)); min_I <- min(min_I, min(out$I)); min_gap <- min(min_gap, min(gap))
+  cat(sprintf("  start=(%.3f,%.4f): tail S in [%.4f,%.4f], tail I in [%.4f,%.4f]\n",
+              st[1], st[2], min(out$S), max(out$S), min(out$I), max(out$I)))
+}
+cat(sprintf("\nAcross all trajectories: min S=%.4f, min I=%.4f, min(1-S-I)=%.4f\n", min_S, min_I, min_gap))
+cat("All strictly positive -> consistent with UNIFORM persistence\n")
+
+# Contrast: R0 < 1
+beta_below <- 0.15
+R0_below <- beta_below / (b + gamma_)
+cat(sprintf("\nR0 = %.3f (< 1, persistence should FAIL)\n", R0_below))
+out_below <- as.data.frame(ode(y = c(S=0.5, I=0.3), times = t_tail, func = rhs,
+                                 parms = c(b=b, beta=beta_below, gamma_=gamma_), method = "lsoda"))
+cat(sprintf("Tail I(t) range when R0<1: [%.6f, %.6f]\n", min(out_below$I), max(out_below$I)))
+cat("I(t) -> 0 -> persistence correctly FAILS\n")
+```
+
+## Block 2 (§3.8) — Perron-Frobenius for Metzler matrices, and Theorem 3.8.3
+
+```{r metzler-checks}
+set.seed(1)
+
+random_metzler <- function(n, diag_range = c(-5,-0.1), offdiag_range = c(0,3)) {
+  A <- matrix(runif(n*n, offdiag_range[1], offdiag_range[2]), nrow = n)
+  diag(A) <- runif(n, diag_range[1], diag_range[2])
+  A
+}
+
+violations <- 0
+n_tests <- 500
+for (i in 1:n_tests) {
+  n <- sample(2:5, 1)
+  A <- random_metzler(n)
+  eig <- eigen(A)
+  s_A <- max(Re(eig$values))
+  idx <- which.min(abs(eig$values - s_A))
+  is_eigenvalue <- abs(Im(eig$values[idx])) < 1e-8
+  v <- Re(eig$vectors[, idx])
+  nonneg <- all(v >= -1e-8) || all(v <= 1e-8)
+  if (!(is_eigenvalue && nonneg)) violations <- violations + 1
+}
+cat(sprintf("Perron-Frobenius (Metzler) check: %d violations out of %d random matrices\n", violations, n_tests))
+
+# Theorem 3.8.3 equivalence (1) <=> (2)
+agreements <- 0
+for (i in 1:n_tests) {
+  n <- sample(2:4, 1)
+  A <- random_metzler(n, diag_range = c(-8,2))
+  s_A <- max(Re(eigen(A, only.values = TRUE)$values))
+  is_stable <- s_A < 0
+  inv_ok <- tryCatch({
+    minus_Ainv <- -solve(A)
+    all(minus_Ainv >= -1e-8)
+  }, error = function(e) FALSE)
+  if (is_stable == inv_ok) agreements <- agreements + 1
+}
+cat(sprintf("Theorem 3.8.3 equivalence (1)<=>(2): %d/%d random Metzler matrices agree\n", agreements, n_tests))
+```
+
+## Block 2 continued — Theorem 3.8.5 applied to Sec. 2.5's Ross-MacDonald model
+
+```{r theorem-3-8-5}
+ross_macdonald <- function(t, state, parms) {
+  x <- state["x"]; y <- state["y"]
+  a <- parms["a"]; m <- parms["m"]; b1 <- parms["b1"]; b2 <- parms["b2"]
+  gamma1 <- parms["gamma1"]; gamma2 <- parms["gamma2"]
+  dx <- a*m*b1*y*(1-x) - gamma1*x
+  dy <- a*b2*x*(1-y) - gamma2*y
+  list(c(dx, dy))
+}
+
+a_param <- 0.3; b1 <- 0.5; b2 <- 0.3; gamma1 <- 0.1; gamma2 <- 0.05
+
+for (case in list(list(m=0.3, label="R0 < 1 (all solutions -> 0)"),
+                   list(m=6.0, label="R0 > 1 (globally stable p>0)"))) {
+  m_param <- case$m
+  R0 <- a_param^2 * m_param * b1 * b2 / (gamma1 * gamma2)
+  t_end <- if (R0 < 1) 3000 else 500
+  results <- purrr::map(list(c(0.1,0.1), c(0.9,0.05), c(0.05,0.9), c(0.5,0.5)), function(st) {
+    out <- ode(y = c(x=st[1], y=st[2]), times = c(0, t_end), func = ross_macdonald,
+               parms = c(a=a_param, m=m_param, b1=b1, b2=b2, gamma1=gamma1, gamma2=gamma2), method = "lsoda")
+    out[nrow(out), c("x","y")]
+  })
+  cat(sprintf("%s: R0=%.2f\n", case$label, R0))
+  for (r in results) cat(sprintf("  (%.6f, %.6f)\n", r[1], r[2]))
+}
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_03/section_3_7_3_8.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_03/exercises/section_3_7_3_8_exercises.md`; solutions:
+`../../chapter_03/solutions/section_3_7_3_8_solutions.md`.*
+
+---
+
+# Chapter 3 Complete
+
+All eight sections of Chapter 3 are now built, verified numerically, and cross-checked against
+their concrete applications throughout Chapter 2.

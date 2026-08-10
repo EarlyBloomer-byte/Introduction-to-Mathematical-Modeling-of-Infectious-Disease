@@ -1,0 +1,106 @@
+---
+title: "Chapter 4, Section 4.2 — Nonlinear Least-Squares Problem"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(minpack.lm)
+```
+
+**Source:** Li, M.Y. (2018), pp. 111–117. Companion to `../../python/chapter_04/section_4_2.ipynb`
+— full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R. Note: this section additionally uses
+`minpack.lm` (Levenberg-Marquardt nonlinear least squares) as the professional cross-check,
+analogous to `scipy.optimize.curve_fit` in the Python notebook.
+
+---
+
+## Gauss-Newton implemented from scratch
+
+```{r gauss-newton}
+t_data <- c(1, 2, 3, 4, 5)
+x_data <- c(4.6, 8.82, 16, 31.3, 58.5)
+
+f_model <- function(t, a0, a1) a0 * exp(a1 * t)
+
+jacobian_gn <- function(t, a0, a1) {
+  col0 <- exp(a1 * t)
+  col1 <- a0 * t * exp(a1 * t)
+  cbind(col0, col1)
+}
+
+gauss_newton <- function(t, y, f, jac, theta0, n_iter = 6) {
+  theta <- theta0
+  history <- list(theta)
+  for (k in 1:n_iter) {
+    residuals <- y - f(t, theta[1], theta[2])
+    J <- jac(t, theta[1], theta[2])
+    delta_theta <- solve(t(J) %*% J, t(J) %*% residuals)
+    theta <- theta + as.vector(delta_theta)
+    history[[k+1]] <- theta
+    cat(sprintf("iteration %d: theta = (%.6f, %.6f)\n", k, theta[1], theta[2]))
+  }
+  list(theta = theta, history = history)
+}
+
+result <- gauss_newton(t_data, x_data, f_model, jacobian_gn, theta0 = c(1, 1), n_iter = 6)
+theta_final <- result$theta
+cat(sprintf("\nFinal Gauss-Newton estimate: a0=%.4f, a1=%.4f\n", theta_final[1], theta_final[2]))
+cat("Book's stated Gauss-Newton answer: a0~=2.431, a1~=0.636\n")
+```
+
+## Cross-checks
+
+```{r cross-checks}
+# Log-linearization (Sec. 4.1 style)
+A <- cbind(1, t_data)
+coefs <- solve(t(A) %*% A, t(A) %*% log(x_data))
+a0_log <- exp(coefs[1]); a1_log <- coefs[2]
+cat(sprintf("Solution 1 (log-linearization): a0=%.4f, a1=%.4f\n", a0_log, a1_log))
+cat(sprintf("Solution 2 (Gauss-Newton, direct): a0=%.4f, a1=%.4f\n", theta_final[1], theta_final[2]))
+
+# minpack.lm (Levenberg-Marquardt) cross-check
+fit_lm <- nlsLM(x_data ~ a0 * exp(a1 * t_data), start = list(a0 = 1, a1 = 1))
+cat("\nminpack.lm::nlsLM cross-check:\n")
+print(coef(fit_lm))
+
+sse <- function(a0, a1) sum((x_data - f_model(t_data, a0, a1))^2)
+cat(sprintf("\nSSE (original space) at log-linearized solution: %.4f\n", sse(a0_log, a1_log)))
+cat(sprintf("SSE (original space) at Gauss-Newton solution:    %.4f\n", sse(theta_final[1], theta_final[2])))
+```
+
+## Visualizing both fits
+
+```{r plot-fits, fig.width=8, fig.height=5.5}
+t_curve <- seq(0.5, 5.5, length.out = 100)
+plot_df <- bind_rows(
+  tibble(t = t_curve, x = f_model(t_curve, theta_final[1], theta_final[2]), curve = "Gauss-Newton"),
+  tibble(t = t_curve, x = f_model(t_curve, a0_log, a1_log), curve = "log-linearized")
+)
+
+ggplot() +
+  geom_point(data = tibble(t=t_data, x=x_data), aes(t, x), size = 2) +
+  geom_line(data = plot_df, aes(t, x, color = curve, linetype = curve)) +
+  labs(title = "Figure 4.4 (recreated): the two curves are nearly indistinguishable") +
+  theme_minimal()
+
+ggsave("../../chapter_04/images/gauss_newton_example4_R.png", width = 8, height = 5.5, dpi = 130)
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_04/section_4_2.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_04/exercises/section_4_2_exercises.md`; solutions:
+`../../chapter_04/solutions/section_4_2_solutions.md`.*

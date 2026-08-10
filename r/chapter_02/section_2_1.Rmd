@@ -1,0 +1,166 @@
+---
+title: "Chapter 2, Section 2.1 — Kermack–McKendrick Model (Detailed Analysis)"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 37–46. Companion to `../../python/chapter_02/section_2_1.ipynb` —
+full prose (rewrite, ELI10, key ideas, all four derivations, symbol tables, intuition) is
+identical to that notebook; this file reproduces the code in R.
+
+---
+
+## Block 1 (§2.1.1) — Verifying the five well-posedness properties
+
+```{r properties-check}
+beta <- 0.0005
+gamma_ <- 0.2
+S0 <- 550; I0 <- 5; R0 <- 0
+N0 <- S0 + I0 + R0
+rho <- gamma_ / beta
+
+kmk <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  dS <- -parms["beta"] * I * S
+  dI <- parms["beta"] * I * S - parms["gamma_"] * I
+  dR <- parms["gamma_"] * I
+  list(c(dS, dI, dR))
+}
+
+t_eval <- seq(0, 500, length.out = 3000)
+sol <- as.data.frame(ode(y = c(S = S0, I = I0, R = R0), times = t_eval, func = kmk,
+                           parms = c(beta = beta, gamma_ = gamma_), method = "lsoda"))
+
+cat("Property 1 (non-negativity):",
+    ifelse(all(sol$S >= -1e-8) && all(sol$I >= -1e-8) && all(sol$R >= -1e-8), "PASS", "FAIL"), "\n")
+
+N_vals <- sol$S + sol$I + sol$R
+cat(sprintf("Property 2 (conservation): max deviation from N0 = %.2e\n", max(abs(N_vals - N0))))
+
+S_inf <- tail(sol$S, 1); I_inf <- tail(sol$I, 1); R_inf <- tail(sol$R, 1)
+cat(sprintf("Property 4/5: S(inf)~=%.4f, I(inf)~=%.6f, R(inf)~=%.4f\n", S_inf, I_inf, R_inf))
+cat(sprintf("S(inf) > 0? %s   I(inf) ~= 0? %s   S(inf) < S0? %s\n",
+            S_inf > 0, I_inf < 1e-3, S_inf < S0))
+
+S_predicted <- S0 * exp(-sol$R / rho)
+max_rel_err <- max(abs(sol$S - S_predicted) / S0)
+cat(sprintf("\nMax relative error, S(t) vs closed-form S0*exp(-R(t)/rho): %.2e\n", max_rel_err))
+```
+
+## Block 2 (§2.1.2) — Recreating the phase portrait (Figure 2.1)
+
+```{r phase-portrait, fig.width=8, fig.height=6}
+N0_fig <- 800
+S_grid <- seq(1, N0_fig, length.out = 400)
+
+curves <- purrr::map_dfr(c(5, 40, 100, 200, 350), function(I0_start) {
+  S0_start <- N0_fig - I0_start
+  C <- I0_start + S0_start - rho * log(S0_start)
+  I_curve <- C - S_grid + rho * log(S_grid)
+  tibble(S = S_grid, I = I_curve, label = sprintf("S0=%.0f, I0=%d", S0_start, I0_start)) %>%
+    filter(I >= 0)
+})
+
+ggplot(curves, aes(x = S, y = I, color = label)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = rho, linetype = "dashed", color = "grey40") +
+  labs(title = "Figure 2.1 (recreated): family of epidemic curves",
+       subtitle = sprintf("threshold rho = %.0f (dashed line)", rho)) +
+  theme_minimal()
+
+ggsave("../../chapter_02/images/phase_portrait_SI_R.png", width = 8, height = 6, dpi = 130)
+
+# Verify I peaks exactly at S = rho along a numerically integrated trajectory
+si_only <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]
+  dS <- -parms["beta"] * I * S
+  dI <- parms["beta"] * I * S - parms["gamma_"] * I
+  list(c(dS, dI))
+}
+sol_si <- as.data.frame(ode(y = c(S = 750, I = 5), times = seq(0, 300, length.out = 5000),
+                              func = si_only, parms = c(beta = beta, gamma_ = gamma_), method = "lsoda"))
+peak_idx <- which.max(sol_si$I)
+cat(sprintf("S at I's peak: %.4f  (threshold rho = %.4f)\n", sol_si$S[peak_idx], rho))
+```
+
+## Block 3 (§2.1.3) — Final size equation and peak formula
+
+```{r final-size}
+final_size_residual <- function(S_inf, S0_val) {
+  (S0_val - S_inf) - rho * (log(S0_val) - log(S_inf))
+}
+
+S_inf_solution <- uniroot(final_size_residual, interval = c(1e-6, S0 - 1e-6), S0_val = S0)$root
+cat(sprintf("Final size equation solution: S_inf = %.4f\n", S_inf_solution))
+R_inf_predicted <- S0 - S_inf_solution
+cat(sprintf("Predicted cumulative infections R_inf = %.4f\n", R_inf_predicted))
+
+# Compare to long-run simulation
+sol_long <- as.data.frame(ode(y = c(S = S0, I = I0, R = 0), times = seq(0, 1000, length.out = 5000),
+                                func = kmk, parms = c(beta = beta, gamma_ = gamma_), method = "lsoda"))
+S_sim_final <- tail(sol_long$S, 1)
+R_sim_final <- tail(sol_long$R, 1)
+cat(sprintf("\nSimulated S(t_end) = %.4f, R(t_end) = %.4f\n", S_sim_final, R_sim_final))
+cat(sprintf("Absolute difference, S_inf: %.4f\n", abs(S_inf_solution - S_sim_final)))
+
+I_max_formula <- -rho + rho * log(rho) + N0 - rho * log(S0)
+I_max_simulated <- max(sol_long$I)
+cat(sprintf("\nI_max via formula (2.12): %.4f\nI_max from simulation:    %.4f\n",
+            I_max_formula, I_max_simulated))
+```
+
+## Block 4 (§2.1.4) — Threshold Theorem accuracy check
+
+```{r threshold-theorem, fig.width=8, fig.height=5}
+exact_R_inf <- function(S0_val) {
+  S_inf <- uniroot(final_size_residual, interval = c(1e-6, S0_val - 1e-6), S0_val = S0_val)$root
+  S0_val - S_inf
+}
+
+nus <- seq(2, 400, length.out = 60)
+S0s <- rho + nus
+R_exacts <- sapply(S0s, exact_R_inf)
+R_approxs <- 2 * nus
+
+theorem_df <- tibble(nu = nus, exact = R_exacts, approx = R_approxs) %>%
+  pivot_longer(c(exact, approx), names_to = "type", values_to = "R_inf")
+
+ggplot(theorem_df, aes(x = nu, y = R_inf, color = type, linetype = type)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Threshold Theorem approximation vs. exact final size",
+       x = TeX("$\\nu = S_0 - \\rho$ (excess above threshold)"), y = TeX("$R_\\infty$")) +
+  theme_minimal()
+
+ggsave("../../chapter_02/images/threshold_theorem_accuracy_R.png", width = 8, height = 5, dpi = 130)
+
+# Print a small table, mirroring the Python notebook's printed table
+for (nu in c(5, 20, 50, 100, 200, 400)) {
+  S0_val <- rho + nu
+  R_exact <- exact_R_inf(S0_val)
+  R_approx <- 2 * nu
+  rel_err <- abs(R_exact - R_approx) / R_exact
+  cat(sprintf("nu=%4.0f | S0=%4.0f | exact=%9.4f | approx=%9.4f | rel.err=%.2f%%\n",
+              nu, S0_val, R_exact, R_approx, rel_err * 100))
+}
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_02/section_2_1.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_02/exercises/section_2_1_exercises.md`; solutions:
+`../../chapter_02/solutions/section_2_1_solutions.md`.*

@@ -1,0 +1,104 @@
+---
+title: "Chapter 1, Section 1.2 — Deterministic Epidemic Models: Compartmental Approach"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 6–8. Companion to `../../python/chapter_01/section_1_2.ipynb` —
+content mirrors that notebook block by block; see it for the full prose (rewrite, ELI10, key
+ideas, symbol table, intuition) which is identical here. This file focuses on reproducing the code.
+
+---
+
+## Block 1 — Recreating the transfer diagram (Figure 1.1)
+
+```{r transfer-diagram, fig.width=9, fig.height=3.6}
+boxes <- tibble::tibble(label = c("S", "I", "R"), x = c(2, 5, 8), y = 1.8)
+
+edges <- tibble::tribble(
+  ~x, ~y, ~xend, ~yend, ~label, ~curve,
+  2.6, 1.8, 4.4, 1.8, "new infections", 0,
+  5.6, 1.8, 7.4, 1.8, "recovery", 0,
+  7.4, 2.3, 2.6, 2.3, "loss of immunity", -0.3
+)
+
+ggplot() +
+  geom_rect(data = boxes, aes(xmin = x - 0.6, xmax = x + 0.6, ymin = y - 0.6, ymax = y + 0.6),
+            fill = "#eef2f7", color = "#31708f", linewidth = 1) +
+  geom_text(data = boxes, aes(x = x, y = y, label = label), size = 6, fontface = "bold") +
+  geom_curve(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
+             curvature = edges$curve, arrow = arrow(length = unit(0.2, "cm")), color = "black") +
+  geom_text(data = edges, aes(x = (x + xend) / 2, y = pmax(y, yend) + 0.35, label = label), size = 3) +
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 4)) +
+  theme_void() +
+  labs(title = "Figure 1.1 (recreated): Transfer diagram for an SIR compartment model")
+
+ggsave("../../chapter_01/images/transfer_diagram_1_1_R.png", width = 9, height = 3.6, dpi = 130)
+```
+
+## Block 2 — Verifying the difference-quotient-to-derivative limit
+
+```{r symbolic-check}
+# R has no first-class symbolic engine as convenient as sympy for this; we
+# verify the SAME claim purely numerically instead (equivalent rigor for our
+# purposes -- see the Python notebook for the symbolic sympy::limit() version).
+S_func <- function(tt) 1000 * exp(-0.05 * tt) + 50 * cos(tt)
+Sprime_true <- function(tt) -50 * exp(-0.05 * tt) - 50 * sin(tt)
+
+t0 <- 5.0
+true_deriv <- Sprime_true(t0)
+
+dts <- c(1.0, 0.1, 0.01, 0.001, 0.0001)
+for (dt in dts) {
+  dq <- (S_func(t0 + dt) - S_func(t0)) / dt
+  cat(sprintf("dt=%8.4f | difference quotient = %10.6f | error = %.8f\n",
+              dt, dq, abs(dq - true_deriv)))
+}
+cat(sprintf("\nTrue derivative S'(%.0f) = %.6f\n", t0, true_deriv))
+```
+
+```{r convergence-plot, fig.width=11, fig.height=4}
+t_grid <- seq(0, 20, length.out = 400)
+p1 <- ggplot(tibble(t = t_grid, S = S_func(t_grid)), aes(t, S)) +
+  geom_line(color = "#31708f") +
+  labs(title = "A concrete example S(t)") +
+  theme_minimal()
+
+dt_seq <- 10^seq(0, -4, length.out = 40)
+errs <- sapply(dt_seq, function(d) abs((S_func(t0 + d) - S_func(t0)) / d - true_deriv))
+p2 <- ggplot(tibble(dt = dt_seq, err = errs), aes(dt, err)) +
+  geom_point(color = "#a94442") + geom_line(color = "#a94442") +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = TeX("Convergence as $\\Delta t \\to 0$"), x = TeX("$\\Delta t$"),
+       y = "| difference quotient - true derivative |") +
+  theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+ggsave("../../chapter_01/images/difference_quotient_convergence_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, ncol = 2), width = 11, height = 4, dpi = 130)
+```
+
+**Reading the output:** as in the Python notebook, the difference quotient converges to the true
+derivative as $\Delta t$ shrinks — this is the numerical face of the Step 3 limiting argument in
+the main derivation (see the Python notebook for the full step-by-step writeup, identical here).
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_01/section_1_2.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_01/exercises/section_1_2_exercises.md`; solutions:
+`../../chapter_01/solutions/section_1_2_solutions.md`.*

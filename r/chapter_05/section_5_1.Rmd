@@ -1,0 +1,100 @@
+---
+title: "Chapter 5, Section 5.1 — Higher Dimensional Models: SEIR Models"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 126–135. Companion to `../../python/chapter_05/section_5_1.ipynb`
+— full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R.
+
+---
+
+## Block 3 — Routh-Hurwitz verification across random parameters
+
+```{r routh-hurwitz}
+equilibria <- function(lam, kappa, gamma_, mu) {
+  R0 <- lam*kappa / ((kappa+mu)*(gamma_+mu))
+  S_star <- (kappa+mu)*(gamma_+mu) / (lam*kappa)
+  I_star <- mu*(1 - S_star) / (lam * S_star)
+  E_star <- (gamma_+mu)/kappa * I_star
+  list(R0=R0, S_star=S_star, E_star=E_star, I_star=I_star)
+}
+
+jacobian_Pstar <- function(lam, kappa, gamma_, mu, S_star, E_star, I_star) {
+  matrix(c(
+    -lam*I_star - mu, lam*I_star, 0,
+    0, -kappa-mu, kappa,
+    -lam*S_star, lam*S_star, -gamma_-mu
+  ), nrow=3, byrow=TRUE)
+}
+
+set.seed(5)
+cat(sprintf("%6s %7s %7s %6s | %6s | %9s %9s %9s | %10s | %s\n",
+            "lam","kappa","gamma","mu","R0","tr","det","a2","tr*a2-det","stable(eig)"))
+for (i in 1:8) {
+  lam_v <- runif(1, 0.3, 2.0); kappa_v <- runif(1, 0.05, 0.3)
+  gamma_v <- runif(1, 0.05, 0.3); mu_v <- runif(1, 0.01, 0.05)
+  eq <- equilibria(lam_v, kappa_v, gamma_v, mu_v)
+  if (eq$R0 <= 1) next
+  J <- jacobian_Pstar(lam_v, kappa_v, gamma_v, mu_v, eq$S_star, eq$E_star, eq$I_star)
+  tr <- sum(diag(J)); det_J <- det(J)
+  M1 <- J[2,2]*J[3,3]-J[2,3]*J[3,2]; M2 <- J[1,1]*J[3,3]-J[1,3]*J[3,1]; M3 <- J[1,1]*J[2,2]-J[1,2]*J[2,1]
+  a2 <- M1+M2+M3
+  eig_stable <- all(Re(eigen(J, only.values=TRUE)$values) < 0)
+  cat(sprintf("%6.3f %7.3f %7.3f %6.3f | %6.3f | %9.4f %9.5f %9.5f | %10.5f | %s\n",
+              lam_v, kappa_v, gamma_v, mu_v, eq$R0, tr, det_J, a2, tr*a2-det_J, eig_stable))
+}
+```
+
+## Block 4 — Global convergence and uniform persistence
+
+```{r global-convergence}
+seir_reduced <- function(t, y, parms) {
+  S <- y["S"]; E <- y["E"]; I <- y["I"]
+  lam <- parms["lam"]; kappa <- parms["kappa"]; gamma_ <- parms["gamma_"]; mu <- parms["mu"]
+  dS <- mu - lam*I*S - mu*S
+  dE <- lam*I*S - (kappa+mu)*E
+  dI <- kappa*E - (gamma_+mu)*I
+  list(c(dS, dE, dI))
+}
+
+kappa_v <- 0.1; gamma_v <- 0.2; mu_v <- 0.02
+
+for (case in list(list(lam=0.15, label="R0<1"), list(lam=1.0, label="R0>1"))) {
+  lam_v <- case$lam
+  R0 <- lam_v*kappa_v/((kappa_v+mu_v)*(gamma_v+mu_v))
+  starts <- list(c(0.9,0.05,0.02), c(0.3,0.3,0.3), c(0.1,0.1,0.7), c(0.5,0.2,0.1))
+  cat(sprintf("%s (R0=%.3f): final states from 4 different starts:\n", case$label, R0))
+  tails <- list()
+  for (st in starts) {
+    out <- ode(y = c(S=st[1], E=st[2], I=st[3]), times = seq(400, 600, length.out = 200),
+               func = seir_reduced, parms = c(lam=lam_v, kappa=kappa_v, gamma_=gamma_v, mu=mu_v),
+               method = "lsoda")
+    final <- out[nrow(out), c("S","E","I")]
+    tails[[length(tails)+1]] <- final
+    cat("  ", final, "\n")
+  }
+}
+```
+
+## Summary / Connections
+
+Identical to `../../python/chapter_05/section_5_1.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_05/exercises/section_5_1_exercises.md`; solutions:
+`../../chapter_05/solutions/section_5_1_solutions.md`.*

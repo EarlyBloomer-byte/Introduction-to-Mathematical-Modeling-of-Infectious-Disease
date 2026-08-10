@@ -1,0 +1,102 @@
+---
+title: "Chapter 3, Section 3.3 — Stability Analysis Using Lyapunov Functions"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 82–84. Companion to `../../python/chapter_03/section_3_3.ipynb` —
+full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to that
+notebook; this file reproduces the code in R.
+
+---
+
+## Block 1 — Energy function for the damped oscillator
+
+```{r energy-function}
+# R lacks as convenient a symbolic engine as sympy for this; we confirm the
+# same claim (V_dot = -c*v^2) numerically by direct substitution instead of
+# symbolic differentiation -- see the Python notebook for the symbolic version.
+damped <- function(t, y, parms) {
+  x <- y["x"]; v <- y["v"]; c <- parms["c"]
+  list(c(v, -x - c*v))
+}
+
+V_func <- function(x, v) 0.5*v^2 + 0.5*x^2
+
+sol <- as.data.frame(ode(y = c(x=1, v=0), times = seq(0, 60, length.out = 3000),
+                           func = damped, parms = c(c=0.3), method = "lsoda"))
+V_along_traj <- V_func(sol$x, sol$v)
+
+diffs <- diff(V_along_traj)
+cat(sprintf("Max increase in V(t) along the trajectory: %.2e (should be <= 0)\n", max(diffs)))
+cat(sprintf("V(0) = %.4f, V(60) = %.6f -- decreasing toward 0\n", V_along_traj[1], tail(V_along_traj,1)))
+```
+
+## Block 2 — LaSalle's Invariance Principle applied to Sec. 2.3's P0
+
+```{r lasalle, fig.width=8, fig.height=5}
+b <- 0.02; gamma_ <- 0.2
+beta_below <- 0.15
+
+rhs <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]
+  b <- parms["b"]; beta <- parms["beta"]; gamma_ <- parms["gamma_"]
+  dS <- b - beta*I*S - b*S
+  dI <- beta*I*S - gamma_*I - b*I
+  list(c(dS, dI))
+}
+
+# On the invariant segment I=0: does S(t) flow toward S=1?
+seg_results <- purrr::map_dfr(c(0.1, 0.3, 0.5, 0.7, 0.9), function(S0) {
+  out <- as.data.frame(ode(y = c(S=S0, I=0), times = seq(0, 100, length.out = 300),
+                             func = rhs, parms = c(b=b, beta=beta_below, gamma_=gamma_), method = "lsoda"))
+  out$S0 <- S0
+  out
+})
+
+p1 <- ggplot(seg_results, aes(time, S, color = factor(S0))) + geom_line() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
+  labs(title = "On the invariant segment {I=0}: S(t) always flows toward S=1=P0", color = "S0") +
+  theme_minimal()
+print(p1)
+ggsave("../../chapter_03/images/lasalle_invariant_segment_R.png", plot = p1, width = 8, height = 5, dpi = 130)
+```
+
+```{r lasalle-full, fig.width=7, fig.height=6}
+starts <- list(c(0.9,0.05), c(0.5,0.3), c(0.2,0.5), c(0.1,0.1), c(0.7,0.2))
+full_results <- purrr::map_dfr(seq_along(starts), function(i) {
+  st <- starts[[i]]
+  out <- as.data.frame(ode(y = c(S=st[1], I=st[2]), times = seq(0, 300, length.out = 600),
+                             func = rhs, parms = c(b=b, beta=beta_below, gamma_=gamma_), method = "lsoda"))
+  out$traj <- i
+  out
+})
+
+p2 <- ggplot(full_results, aes(S, I, group = traj)) + geom_path(alpha = 0.8) +
+  annotate("point", x = 1, y = 0, color = "#3c763d", shape = 8, size = 5) +
+  labs(title = "Full LaSalle conclusion: ALL trajectories in Gamma -> P0") +
+  theme_minimal()
+print(p2)
+ggsave("../../chapter_03/images/lasalle_full_convergence_R.png", plot = p2, width = 7, height = 6, dpi = 130)
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_03/section_3_3.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_03/exercises/section_3_3_exercises.md`; solutions:
+`../../chapter_03/solutions/section_3_3_solutions.md`.*

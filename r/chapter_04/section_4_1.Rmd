@@ -1,0 +1,123 @@
+---
+title: "Chapter 4, Section 4.1 — Curve-Fitting and the Linear Least-Squares Problem"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+```
+
+**Source:** Li, M.Y. (2018), pp. 104–111. Companion to `../../python/chapter_04/section_4_1.ipynb`
+— full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R.
+
+---
+
+## Example 1 — Linear fit
+
+```{r example1}
+x_data <- c(2, 5, 7, 8)
+y_data <- c(1, 2, 3, 3)
+
+A <- cbind(1, x_data)
+b <- y_data
+
+# Method 1: normal equations
+x_hat_normal_eq <- solve(t(A) %*% A, t(A) %*% b)
+cat("Method 1 (normal equations):", x_hat_normal_eq, "\n")
+
+# Method 2: R's built-in lm()
+fit <- lm(y_data ~ x_data)
+cat("Method 2 (lm()):", coef(fit), "\n")
+
+cat(sprintf("\nBook's stated answer: a0 = 2/7 = %.6f, a1 = 5/14 = %.6f\n", 2/7, 5/14))
+
+# Orthogonality check
+residual_vec <- b - A %*% x_hat_normal_eq
+for (j in 1:ncol(A)) {
+  dot <- sum(residual_vec * A[, j])
+  cat(sprintf("(b - A*x_hat) . (column %d of A) = %.2e (should be ~0)\n", j, dot))
+}
+```
+
+## Example 2 — Quadratic fit
+
+```{r example2}
+x_data2 <- c(2, -1, 6, 4)
+y_data2 <- c(1, 5, 2, -1)
+
+A2 <- cbind(1, x_data2, x_data2^2)
+b2 <- y_data2
+
+x_hat2 <- solve(t(A2) %*% A2, t(A2) %*% b2)
+cat("Least-squares quadratic coefficients (a0, a1, a2):", x_hat2, "\n")
+cat("Book's stated answer: a0=2.9719, a1=-1.909, a2=0.2826\n")
+
+# Cross-check with R's poly() / lm()
+fit2 <- lm(y_data2 ~ x_data2 + I(x_data2^2))
+cat("lm() cross-check:", coef(fit2), "\n")
+```
+
+## Example 3 — Exponential fit via log-linearization
+
+```{r example3}
+set.seed(3)
+a0_true <- 2.0; a1_true <- 0.35
+t_data <- c(0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5)
+x_true <- a0_true * exp(a1_true * t_data)
+x_data3 <- x_true * exp(rnorm(length(t_data), sd = 0.05))
+
+y_data3 <- log(x_data3)
+A3 <- cbind(1, t_data)
+coefs3 <- solve(t(A3) %*% A3, t(A3) %*% y_data3)
+b0_hat <- coefs3[1]; a1_hat <- coefs3[2]
+a0_hat <- exp(b0_hat)
+
+cat(sprintf("True parameters:      a0=%.2f, a1=%.2f\n", a0_true, a1_true))
+cat(sprintf("Recovered parameters: a0=%.4f, a1=%.4f\n", a0_hat, a1_hat))
+```
+
+## Visualizing all three fits
+
+```{r plot-all, fig.width=15, fig.height=4.5}
+p1 <- ggplot() +
+  geom_point(data = tibble(x=x_data, y=y_data), aes(x, y)) +
+  geom_abline(intercept = x_hat_normal_eq[1], slope = x_hat_normal_eq[2], color = "#31708f") +
+  labs(title = "Example 1: linear fit") + theme_minimal()
+
+x_curve <- seq(-2, 7, length.out = 200)
+p2 <- ggplot() +
+  geom_point(data = tibble(x=x_data2, y=y_data2), aes(x, y)) +
+  geom_line(data = tibble(x=x_curve, y=x_hat2[1]+x_hat2[2]*x_curve+x_hat2[3]*x_curve^2),
+            aes(x, y), color = "#a94442") +
+  labs(title = "Example 2: quadratic fit") + theme_minimal()
+
+t_curve <- seq(0, 4, length.out = 100)
+p3 <- ggplot() +
+  geom_point(data = tibble(t=t_data, x=x_data3), aes(t, x)) +
+  geom_line(data = tibble(t=t_curve, x=a0_hat*exp(a1_hat*t_curve)), aes(t, x), color = "#3c763d") +
+  geom_line(data = tibble(t=t_curve, x=a0_true*exp(a1_true*t_curve)), aes(t, x),
+            color = "grey40", linetype = "dashed") +
+  labs(title = "Example 3: exponential fit (log-linearized)") + theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
+ggsave("../../chapter_04/images/least_squares_examples_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, p3, ncol = 3), width = 15, height = 4.5, dpi = 130)
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_04/section_4_1.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_04/exercises/section_4_1_exercises.md`; solutions:
+`../../chapter_04/solutions/section_4_1_solutions.md`.*

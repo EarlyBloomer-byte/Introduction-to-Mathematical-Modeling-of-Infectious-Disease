@@ -1,0 +1,386 @@
+---
+title: "Chapter 1, Section 1.1 — Mathematical Modeling of Infectious Diseases: Issues and Approaches"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+# deSolve is loaded for consistency with later sections; Sec. 1.1 has no ODEs yet.
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), *An Introduction to Mathematical Modeling of Infectious Diseases*,
+Springer, pp. 1–6. See `../python/section_1_1.ipynb` for the companion Python notebook — this
+file mirrors it exactly, block by block.
+
+Section 1.1 is entirely conceptual (no formulas yet), so the code chunks below build small
+illustrative tools rather than solving equations. Real ODEs start in `section_1_2.Rmd`.
+
+---
+
+## Block 1 — What makes a disease "infectious," and the vocabulary of spread
+
+### Rewrite (plain English)
+
+A disease counts as *infectious* if whatever causes it can move from one host to another —
+through touch, air, water/food, a disease vector, or mother-to-child. A model of an infectious
+disease describes how it spreads through a population: infectious people mix with susceptible
+people and the disease passes between them. Depending on scale, speed, persistence, and
+geography, we call the resulting spread an **outbreak**, **epidemic**, **endemic** disease, or
+**pandemic** (the book's example: the 1918 Spanish flu, which killed over 50 million people
+across every continent).
+
+### Explain Like I'm 10
+
+Same rumor-at-school story as the Python notebook: an outbreak is more kids than usual hearing it
+suddenly; an epidemic is it ripping through the whole school fast; endemic is it never quite going
+away because new kids keep arriving; pandemic is it jumping to other schools, then other
+countries.
+
+### Key Ideas
+
+Same table as the Python notebook: mode of transmission, susceptible/infectious roles,
+asymptomatic infection, the outbreak/epidemic/endemic/pandemic distinction, and acquired
+immunity — see `../python/section_1_1.ipynb` Block 1 for the full table and why each matters
+later in the book.
+
+### Visual Understanding — classification logic + flow diagram
+
+```{r classify-function}
+# Classify a disease event using ONLY the verbal definitions in Sec. 1.1.
+# (Mirrors classify_disease_event() in the Python notebook exactly.)
+classify_disease_event <- function(above_baseline, fast_widespread,
+                                    persists_long_term, crosses_continents) {
+  if (!above_baseline) return("no event")
+  if (crosses_continents) return("pandemic")
+  if (persists_long_term) return("endemic")
+  if (fast_widespread) return("epidemic")
+  return("outbreak")
+}
+
+# Sanity-check against the book's own example: 1918 Spanish flu
+spanish_flu <- classify_disease_event(
+  above_baseline = TRUE, fast_widespread = TRUE,
+  persists_long_term = FALSE, crosses_continents = TRUE
+)
+cat("1918 Spanish flu classifies as:", spanish_flu, "\n")
+
+local_cluster <- classify_disease_event(
+  above_baseline = TRUE, fast_widespread = FALSE,
+  persists_long_term = FALSE, crosses_continents = FALSE
+)
+cat("Small local case cluster classifies as:", local_cluster, "\n")
+
+persistent_regional <- classify_disease_event(
+  above_baseline = TRUE, fast_widespread = FALSE,
+  persists_long_term = TRUE, crosses_continents = FALSE
+)
+cat("Persistent regional transmission classifies as:", persistent_regional, "\n")
+```
+
+```{r verification-block1}
+# Verification: same five assertions as the Python notebook
+stopifnot(classify_disease_event(FALSE, FALSE, FALSE, FALSE) == "no event")
+stopifnot(classify_disease_event(TRUE, TRUE, FALSE, TRUE) == "pandemic")
+stopifnot(classify_disease_event(TRUE, FALSE, TRUE, FALSE) == "endemic")
+stopifnot(classify_disease_event(TRUE, TRUE, FALSE, FALSE) == "epidemic")
+stopifnot(classify_disease_event(TRUE, FALSE, FALSE, FALSE) == "outbreak")
+cat("All 5 classification rules verified against Sec. 1.1 definitions.\n")
+```
+
+```{r flow-diagram, fig.width=9, fig.height=5}
+# Flow diagram of the decision logic, built with base ggplot2 geoms
+# (rectangles + text + segments), mirroring the matplotlib version in Python.
+boxes <- tibble::tribble(
+  ~key,        ~x,   ~y,   ~label,                                   ~kind,
+  "start",     0.08, 0.5,  "Case count rises\nabove baseline?",      "decision",
+  "no",        0.08, 0.08, "No event",                               "no",
+  "cont",      0.35, 0.85, "Crosses\ncontinents?",                   "decision",
+  "pandemic",  0.62, 0.85, "PANDEMIC",                                "yes",
+  "persist",   0.35, 0.5,  "Keeps circulating\n(new susceptibles /\neasy reinfection)?", "decision",
+  "endemic",   0.62, 0.5,  "ENDEMIC",                                 "yes",
+  "fast",      0.35, 0.15, "Spreads fast to\nmany people?",          "decision",
+  "epidemic",  0.62, 0.15, "EPIDEMIC",                                "yes",
+  "outbreak",  0.88, 0.15, "OUTBREAK\n(neither fast\nnor global)",   "yes"
+)
+
+edges <- tibble::tribble(
+  ~x, ~y, ~xend, ~yend,
+  0.08, 0.5,  0.08, 0.08,   # start -> no
+  0.08, 0.5,  0.35, 0.85,   # start -> cont
+  0.35, 0.85, 0.62, 0.85,   # cont -> pandemic
+  0.35, 0.85, 0.35, 0.5,    # cont -> persist
+  0.35, 0.5,  0.62, 0.5,    # persist -> endemic
+  0.35, 0.5,  0.35, 0.15,   # persist -> fast
+  0.35, 0.15, 0.62, 0.15,   # fast -> epidemic
+  0.35, 0.15, 0.88, 0.15    # fast -> outbreak
+)
+
+fill_map <- c(decision = "#eef2f7", no = "#f2dede", yes = "#dff0d8")
+
+ggplot() +
+  geom_segment(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.2, "cm")), color = "grey40") +
+  geom_label(data = boxes, aes(x = x, y = y, label = label, fill = kind),
+             color = "black", label.size = 0.3, size = 3) +
+  scale_fill_manual(values = fill_map, guide = "none") +
+  theme_void() +
+  labs(title = "Classifying a disease event (Sec. 1.1 vocabulary)") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+
+ggsave("../../chapter_01/images/disease_vocabulary_flow_R.png", width = 9, height = 5, dpi = 130)
+```
+
+---
+
+## Block 2 — The questions public health authorities actually ask
+
+Rewrite / ELI10 / Key Ideas / Intuition: identical content to the Python notebook Block 2 — see
+`../python/section_1_1.ipynb` for the full text (severity, duration, intervention effectiveness,
+stockpiling, containment; and the four reasons traditional methods fall short: scale, ethics,
+data completeness, single-sample problem).
+
+```{r scale-mismatch}
+# Same "scale mismatch" illustration as the Python notebook: potential contact
+# pairs grow quadratically with population size, not linearly.
+population_sizes <- c(10, 100, 1000, 10000, 100000)
+potential_contact_pairs <- population_sizes * (population_sizes - 1) / 2
+
+scale_df <- tibble::tibble(
+  population_size = population_sizes,
+  potential_contact_pairs = potential_contact_pairs,
+  pairs_per_person = potential_contact_pairs / population_sizes
+)
+scale_df
+```
+
+**Reading the table:** identical takeaway to the Python version — a city of 100,000 has roughly
+5 billion potential contact pairs, which is why lab-scale experiments cannot capture population-
+scale transmission dynamics.
+
+---
+
+## Block 3 — What modeling provides, and the six-stage modeling process
+
+Rewrite / ELI10 / Key Ideas / Intuition: identical content to the Python notebook Block 3 (the
+paper-airplane analogy and the six-stage table). See `../python/section_1_1.ipynb`.
+
+```{r six-stage-loop, fig.width=7, fig.height=7}
+stages <- c(
+  "1. Make\nassumptions",
+  "2. Build model\n(diagram -> equations)",
+  "3. Mathematical\nanalysis",
+  "4. Interpret\nfindings",
+  "5. Collect data\n& validate",
+  "6. Improve\nassumptions"
+)
+
+n <- length(stages)
+angles <- seq(pi / 2, pi / 2 - 2 * pi, length.out = n + 1)[1:n]  # start at top, go clockwise
+radius <- 1
+loop_df <- tibble::tibble(
+  stage = stages,
+  x = radius * cos(angles),
+  y = radius * sin(angles)
+)
+
+# Build arrows stage i -> stage i+1 (looping 6 -> 1), shrunk so they don't
+# overlap the label boxes.
+shrink <- 0.30
+edge_df <- purrr::map_dfr(seq_len(n), function(i) {
+  j <- if (i == n) 1 else i + 1
+  x0 <- loop_df$x[i]; y0 <- loop_df$y[i]
+  x1 <- loop_df$x[j]; y1 <- loop_df$y[j]
+  dx <- x1 - x0; dy <- y1 - y0
+  dist <- sqrt(dx^2 + dy^2)
+  tibble::tibble(
+    x = x0 + dx * shrink / dist, y = y0 + dy * shrink / dist,
+    xend = x1 - dx * shrink / dist, yend = y1 - dy * shrink / dist
+  )
+})
+
+ggplot() +
+  geom_curve(data = edge_df, aes(x = x, y = y, xend = xend, yend = yend),
+             curvature = 0.15, arrow = arrow(length = unit(0.2, "cm")), color = "grey40") +
+  geom_label(data = loop_df, aes(x = x, y = y, label = stage),
+             fill = "#eef2f7", color = "#31708f", size = 3.2) +
+  coord_equal(xlim = c(-1.6, 1.6), ylim = c(-1.6, 1.6)) +
+  theme_void() +
+  labs(title = "The six-stage mathematical modeling process (Sec. 1.1)") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+
+ggsave("../../chapter_01/images/six_stage_modeling_loop_R.png", width = 7, height = 7, dpi = 130)
+```
+
+---
+
+## Block 4 — A model is an approximation; limitations; the realism/tractability trade-off
+
+Rewrite / ELI10 / Key Ideas / Intuition: identical content to the Python notebook Block 4 (the
+map-vs-city analogy, the three named limitations, and the complexity/tractability trade-off).
+
+```{r realism-tradeoff, fig.width=11, fig.height=4.2}
+set.seed(42)
+
+x <- seq(0, 10, length.out = 8)
+y_true <- 2.0 + 0.5 * x
+y_obs <- y_true + rnorm(length(x), sd = 1.0)
+
+x_grid <- seq(0, 10, length.out = 100)
+n_boot <- 200
+simple_curves <- matrix(NA, nrow = n_boot, ncol = length(x_grid))
+complex_curves <- matrix(NA, nrow = n_boot, ncol = length(x_grid))
+
+for (b in seq_len(n_boot)) {
+  idx <- sample(seq_along(x), length(x), replace = TRUE)
+  xb <- x[idx]; yb <- y_obs[idx]
+  simple_fit <- lm(yb ~ xb)                                  # 2 parameters
+  complex_fit <- lm(yb ~ poly(xb, 6, raw = TRUE))             # 7 parameters
+  simple_curves[b, ] <- predict(simple_fit, newdata = data.frame(xb = x_grid))
+  complex_curves[b, ] <- predict(complex_fit, newdata = data.frame(xb = x_grid))
+}
+
+simple_spread <- mean(apply(simple_curves, 2, sd))
+complex_spread <- mean(apply(complex_curves, 2, sd))
+
+cat(sprintf("Average prediction uncertainty, SIMPLE model (2 params):  %.3f\n", simple_spread))
+cat(sprintf("Average prediction uncertainty, COMPLEX model (7 params): %.3f\n", complex_spread))
+cat(sprintf("\nThe more 'realistic' (higher-degree) model is %.1fx more uncertain, from the SAME 8 data points.\n",
+            complex_spread / simple_spread))
+
+# Plot
+plot_df <- bind_rows(
+  as_tibble(t(simple_curves[seq(1, n_boot, by = 4), ])) %>%
+    mutate(x = x_grid) %>%
+    pivot_longer(-x, names_to = "rep", values_to = "y") %>%
+    mutate(model = "Simple (2 params)"),
+  as_tibble(t(complex_curves[seq(1, n_boot, by = 4), ])) %>%
+    mutate(x = x_grid) %>%
+    pivot_longer(-x, names_to = "rep", values_to = "y") %>%
+    mutate(model = "Complex (7 params)")
+)
+obs_df <- tibble(x = x, y = y_obs)
+
+ggplot(plot_df, aes(x = x, y = y, group = rep)) +
+  geom_line(alpha = 0.08, color = ifelse(plot_df$model == "Simple (2 params)", "#31708f", "#a94442")) +
+  geom_point(data = obs_df, aes(x = x, y = y, group = NULL), color = "black", size = 2) +
+  facet_wrap(~model) +
+  coord_cartesian(ylim = c(-5, 12)) +
+  labs(title = "Realism vs. tractability: same data, two model complexities",
+       x = "x", y = "y") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/realism_tradeoff_R.png", width = 11, height = 4.2, dpi = 130)
+```
+
+---
+
+## Block 5 — Three modeling paradigms: statistical, deterministic, stochastic
+
+Rewrite / ELI10 / Key Ideas / Intuition: identical content to the Python notebook Block 5 (the
+three-friends-predicting-a-rumor analogy and the comparison table).
+
+```{r det-vs-stoch, fig.width=11, fig.height=4.2}
+set.seed(7)
+
+simulate_birth_process <- function(N0, rate, t_max) {
+  # Continuous-time linear birth process via the Gillespie algorithm.
+  # Mirrors simulate_birth_process() in the Python notebook exactly.
+  t <- 0
+  N <- N0
+  times <- c(t)
+  pops <- c(N)
+  while (t < t_max) {
+    total_rate <- rate * N
+    if (total_rate <= 0) break
+    dt <- rexp(1, rate = total_rate)
+    t <- t + dt
+    if (t > t_max) break
+    N <- N + 1
+    times <- c(times, t)
+    pops <- c(pops, N)
+  }
+  times <- c(times, t_max)
+  pops <- c(pops, N)
+  list(times = times, pops = pops)
+}
+
+rate <- 0.3
+t_max <- 15
+n_realizations <- 25
+t_grid <- seq(0, t_max, length.out = 200)
+
+make_panel_df <- function(N0, label) {
+  deterministic <- tibble(t = t_grid, N = N0 * exp(rate * t_grid), label = label)
+  sims <- purrr::map_dfr(seq_len(n_realizations), function(i) {
+    sim <- simulate_birth_process(N0, rate, t_max)
+    tibble(t = sim$times, N = sim$pops, rep = i, label = label)
+  })
+  list(det = deterministic, sims = sims)
+}
+
+small <- make_panel_df(5, "SMALL population (N0=5)")
+large <- make_panel_df(500, "LARGE population (N0=500)")
+
+sims_all <- bind_rows(small$sims, large$sims)
+det_all <- bind_rows(small$det, large$det)
+
+ggplot() +
+  geom_step(data = sims_all, aes(x = t, y = N, group = rep),
+            color = "#a94442", alpha = 0.25) +
+  geom_line(data = det_all, aes(x = t, y = N), color = "#31708f", linewidth = 1.2) +
+  facet_wrap(~label, scales = "free_y") +
+  labs(title = "Why deterministic models need large populations",
+       x = "time", y = "population size") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/deterministic_vs_stochastic_R.png", width = 11, height = 4.2, dpi = 130)
+
+cat("Small-population runs spread widely around the deterministic curve;\n")
+cat("large-population runs hug it closely -- exactly the trade-off the text describes.\n")
+```
+
+```{r verification-block5}
+# Numerical verification: mean tracks deterministic curve; relative spread shrinks with N0.
+for (N0 in c(5, 50, 500)) {
+  finals <- replicate(300, {
+    sim <- simulate_birth_process(N0, rate, t_max)
+    tail(sim$pops, 1)
+  })
+  deterministic_final <- N0 * exp(rate * t_max)
+  mean_ratio <- mean(finals) / deterministic_final
+  coeff_of_variation <- sd(finals) / mean(finals)
+  cat(sprintf("N0=%4d:  mean(stochastic)/deterministic = %5.3f   coefficient of variation = %5.3f\n",
+              N0, mean_ratio, coeff_of_variation))
+}
+cat("\nAs N0 grows, the mean ratio -> 1 and the coefficient of variation shrinks.\n")
+```
+
+---
+
+## Summary
+
+Identical to the Python notebook's Summary section:
+
+**One sentence:** Infectious disease modeling exists because traditional experimental and
+statistical methods can't safely or completely answer public health's most urgent questions about
+an epidemic, and mathematical models — built through a six-stage assumption→equations→analysis→
+validation loop — fill that gap, at the cost of always being a simplified, imperfect approximation
+of reality.
+
+See `../python/section_1_1.ipynb` for the full one-paragraph summary, bullet points, memory aids,
+and connections — content is identical across both languages by design, so you can study from
+whichever you're running.
+
+*Practice problems for this section are in `../../chapter_01/exercises/section_1_1_exercises.md`, with full
+worked solutions in `../../chapter_01/solutions/section_1_1_solutions.md`.*

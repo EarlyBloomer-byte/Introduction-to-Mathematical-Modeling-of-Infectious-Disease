@@ -1,0 +1,149 @@
+---
+title: "Chapter 2, Section 2.3 — A Model with Demography"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 52–60. Companion to `../../python/chapter_02/section_2_3.ipynb` —
+full prose (rewrite, ELI10, key ideas, all derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R.
+
+---
+
+## Block 2 (§2.3.2) — Jacobian eigenvalues at both equilibria
+
+```{r eigenvalue-sweep}
+jacobian_P0 <- function(b, beta, gamma_) {
+  matrix(c(-b, 0, -beta, beta - (b + gamma_)), nrow = 2, byrow = FALSE)
+}
+
+equilibrium_Pstar <- function(b, beta, gamma_) {
+  S_star <- (b + gamma_) / beta
+  I_star <- b * (beta - (b + gamma_)) / (beta * (b + gamma_))
+  c(S_star = S_star, I_star = I_star)
+}
+
+jacobian_Pstar <- function(b, beta, gamma_) {
+  eq <- equilibrium_Pstar(b, beta, gamma_)
+  S_star <- eq["S_star"]; I_star <- eq["I_star"]
+  matrix(c(-beta*I_star - b, beta*I_star, -beta*S_star, 0), nrow = 2, byrow = FALSE)
+}
+
+b <- 0.02; gamma_ <- 0.2
+for (beta in c(0.1, 0.15, 0.2196, 0.25, 0.3, 0.5)) {
+  R0 <- beta / (b + gamma_)
+  eig0 <- eigen(jacobian_P0(b, beta, gamma_), only.values = TRUE)$values
+  P0_stable <- all(Re(eig0) < 0)
+
+  if (R0 > 1) {
+    eigstar <- eigen(jacobian_Pstar(b, beta, gamma_), only.values = TRUE)$values
+    star_stable <- all(Re(eigstar) < 0)
+    eigstar_str <- paste(round(eigstar, 3), collapse = ", ")
+  } else {
+    eigstar_str <- "P* not in feasible region"
+    star_stable <- NA
+  }
+  cat(sprintf("beta=%.4f | R0=%.3f | eig(P0)=[%s] | P0 stable=%s | eig(P*)=[%s] | P* stable=%s\n",
+              beta, R0, paste(round(eig0,3), collapse=", "), P0_stable, eigstar_str, star_stable))
+}
+```
+
+## Block 3 (§2.3.3) — Bifurcation diagram (Figure 2.7)
+
+```{r bifurcation, fig.width=8, fig.height=5.5}
+R0_grid <- seq(0.2, 3, length.out = 400)
+beta_grid <- R0_grid * (b + gamma_)
+I_star_grid <- ifelse(beta_grid > (b + gamma_),
+                        b * (beta_grid - (b + gamma_)) / (beta_grid * (b + gamma_)), NA)
+
+stable1 <- tibble(R0 = R0_grid[R0_grid < 1], I = 0)
+unstable1 <- tibble(R0 = R0_grid[R0_grid >= 1], I = 0)
+branch2 <- tibble(R0 = R0_grid, I = I_star_grid) %>% filter(!is.na(I))
+
+ggplot() +
+  geom_line(data = stable1, aes(R0, I), color = "#3c763d", linewidth = 1.2) +
+  geom_line(data = unstable1, aes(R0, I), color = "#a94442", linewidth = 1, linetype = "dashed") +
+  geom_line(data = branch2, aes(R0, I), color = "#3c763d", linewidth = 1.2) +
+  geom_vline(xintercept = 1, linetype = "dotted", color = "grey40") +
+  labs(title = "Figure 2.7 (recreated): bifurcation diagram, model with demography",
+       x = TeX("$\\mathcal{R}_0$"), y = TeX("equilibrium $I^*$")) +
+  theme_minimal()
+
+ggsave("../../chapter_02/images/demography_bifurcation_diagram_R.png", width = 8, height = 5.5, dpi = 130)
+```
+
+## Block 4 (§2.3.4–2.3.5) — Global convergence and the Bendixson–Dulac check
+
+```{r phase-portraits, fig.width=12, fig.height=5.5}
+rhs <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]
+  b <- parms["b"]; beta <- parms["beta"]; gamma_ <- parms["gamma_"]
+  dS <- b - beta*I*S - b*S
+  dI <- beta*I*S - gamma_*I - b*I
+  list(c(dS, dI))
+}
+
+starts <- list(c(0.9,0.05), c(0.5,0.3), c(0.2,0.5), c(0.1,0.1), c(0.7,0.2))
+
+simulate_case <- function(beta_val, t_max) {
+  purrr::map_dfr(seq_along(starts), function(i) {
+    st <- starts[[i]]
+    out <- as.data.frame(ode(y = c(S = st[1], I = st[2]), times = seq(0, t_max, length.out = 600),
+                               func = rhs, parms = c(b = b, beta = beta_val, gamma_ = gamma_), method = "lsoda"))
+    out$traj <- i
+    out
+  })
+}
+
+beta_below <- 0.15; R0_below <- beta_below / (b + gamma_)
+beta_above <- 0.5; R0_above <- beta_above / (b + gamma_)
+S_star <- (b + gamma_) / beta_above
+I_star <- b * (beta_above - (b + gamma_)) / (beta_above * (b + gamma_))
+
+traj_below <- simulate_case(beta_below, 300)
+traj_above <- simulate_case(beta_above, 400)
+
+p1 <- ggplot(traj_below, aes(S, I, group = traj)) +
+  geom_path(alpha = 0.8) +
+  annotate("point", x = 1, y = 0, color = "#3c763d", shape = 8, size = 5) +
+  labs(title = sprintf("R0=%.2f < 1: all orbits -> P0", R0_below)) + theme_minimal()
+
+p2 <- ggplot(traj_above, aes(S, I, group = traj)) +
+  geom_path(alpha = 0.8) +
+  annotate("point", x = S_star, y = I_star, color = "#3c763d", shape = 8, size = 5) +
+  annotate("point", x = 1, y = 0, color = "#a94442", shape = 4, size = 4) +
+  labs(title = sprintf("R0=%.2f > 1: all orbits -> P*", R0_above)) + theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2,
+  top = "Figure 2.8 (recreated): phase portraits, global convergence")
+ggsave("../../chapter_02/images/demography_phase_portraits_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, ncol = 2), width = 12, height = 5.5, dpi = 130)
+
+# Bendixson-Dulac sign check on a grid
+S_grid <- outer(seq(0.01, 0.99, length.out = 50), rep(1, 50))
+I_grid <- t(outer(seq(0.01, 0.99, length.out = 50), rep(1, 50)))
+dulac_expr <- -beta_above - b / I_grid
+cat(sprintf("Bendixson-Dulac expression: max value on grid = %.4f (should be < 0)\n", max(dulac_expr)))
+cat(sprintf("All negative? %s\n", all(dulac_expr < 0)))
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_02/section_2_3.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_02/exercises/section_2_3_exercises.md`; solutions:
+`../../chapter_02/solutions/section_2_3_solutions.md`.*

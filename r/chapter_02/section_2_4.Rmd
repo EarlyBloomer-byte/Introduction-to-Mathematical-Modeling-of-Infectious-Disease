@@ -1,0 +1,135 @@
+---
+title: "Chapter 2, Section 2.4 — An SIR Model with Varying Total Population: Homogeneous Systems"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 60–67. Companion to `../../python/chapter_02/section_2_4.ipynb` —
+full prose (rewrite, ELI10, key ideas, all derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R.
+
+---
+
+## Block 2 — Full 3D system vs. directly-integrated projected system
+
+```{r projection-check, fig.width=8, fig.height=5}
+full_system <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  N <- S + I + R
+  b <- parms["b"]; d <- parms["d"]; lam <- parms["lam"]; gamma_ <- parms["gamma_"]
+  dS <- b*N - lam*I*S/N - d*S
+  dI <- lam*I*S/N - (d+gamma_)*I
+  dR <- gamma_*I - d*R
+  list(c(dS, dI, dR))
+}
+
+projected_system <- function(t, y, parms) {
+  s <- y["s"]; i <- y["i"]; r <- y["r"]
+  b <- parms["b"]; lam <- parms["lam"]; gamma_ <- parms["gamma_"]
+  ds <- b - lam*i*s - b*s
+  di <- lam*i*s - (b+gamma_)*i
+  dr <- gamma_*i - b*r
+  list(c(ds, di, dr))
+}
+
+b <- 0.03; d <- 0.03; lam <- 0.5; gamma_ <- 0.2
+S0 <- 900; I0 <- 50; R0 <- 50
+N0 <- S0 + I0 + R0
+t_eval <- seq(0, 100, length.out = 500)
+
+sol_full <- as.data.frame(ode(y = c(S = S0, I = I0, R = R0), times = t_eval, func = full_system,
+                                parms = c(b = b, d = d, lam = lam, gamma_ = gamma_), method = "lsoda"))
+N_full <- sol_full$S + sol_full$I + sol_full$R
+s_full <- sol_full$S / N_full
+i_full <- sol_full$I / N_full
+
+sol_proj <- as.data.frame(ode(y = c(s = S0/N0, i = I0/N0, r = R0/N0), times = t_eval,
+                                func = projected_system, parms = c(b = b, lam = lam, gamma_ = gamma_),
+                                method = "lsoda"))
+
+plot_df <- bind_rows(
+  tibble(t = t_eval, val = s_full, series = "s(t) FULL 3D"),
+  tibble(t = t_eval, val = sol_proj$s, series = "s(t) PROJECTED"),
+  tibble(t = t_eval, val = i_full, series = "i(t) FULL 3D"),
+  tibble(t = t_eval, val = sol_proj$i, series = "i(t) PROJECTED")
+)
+
+ggplot(plot_df, aes(t, val, color = series, linetype = series)) +
+  geom_line() +
+  labs(title = "Full system's fractions vs. directly-integrated projected system",
+       x = "time", y = "fraction of population") +
+  theme_minimal()
+
+ggsave("../../chapter_02/images/homogeneous_projection_check_R.png", width = 8, height = 5, dpi = 130)
+
+cat(sprintf("Max difference, s(t): %.2e\n", max(abs(s_full - sol_proj$s))))
+cat(sprintf("Max difference, i(t): %.2e\n", max(abs(i_full - sol_proj$i))))
+```
+
+## Block 3 — Three demographic regimes
+
+```{r regimes, fig.width=12, fig.height=9}
+gamma_ <- 0.2
+S0 <- 900; I0 <- 50; R0 <- 50
+
+run_full <- function(b, d, lam, t_max, n=400) {
+  as.data.frame(ode(y = c(S = S0, I = I0, R = R0), times = seq(0, t_max, length.out = n),
+                      func = full_system, parms = c(b = b, d = d, lam = lam, gamma_ = gamma_),
+                      method = "lsoda"))
+}
+
+# Case I: b = d
+sol1 <- run_full(0.03, 0.03, 0.5, 150)
+sol1$N <- sol1$S + sol1$I + sol1$R
+p1 <- ggplot(sol1, aes(time, N)) + geom_line(color = "#31708f") +
+  labs(title = "Case I: b=d=0.03 -> N(t) constant") + theme_minimal()
+
+# Case II: b < d
+sol2 <- run_full(0.02, 0.05, 0.5, 150)
+sol2$N <- sol2$S + sol2$I + sol2$R
+p2 <- ggplot(sol2, aes(time, N)) + geom_line(color = "#a94442") +
+  labs(title = "Case II: b=0.02<d=0.05 -> N(t) -> 0") + theme_minimal()
+
+# Case IIIa, R1 < 1 (I grows despite R0<1)
+b3 <- 0.05; d3 <- 0.02; lam_a <- 0.15
+R0_a <- lam_a / (b3 + gamma_); R1_a <- (d3 + gamma_) / lam_a
+sol3 <- run_full(b3, d3, lam_a, 100)
+p3 <- ggplot(sol3, aes(time, I)) + geom_line(color = "#a94442") + scale_y_log10() +
+  labs(title = sprintf("Case IIIa: R0=%.2f<1, R1=%.2f<1 -> I(t) grows anyway!", R0_a, R1_a)) +
+  theme_minimal()
+
+# Case IIIa, R1 > 1 (I decays)
+lam_b <- 0.1
+R0_b <- lam_b / (b3 + gamma_); R1_b <- (d3 + gamma_) / lam_b
+sol4 <- run_full(b3, d3, lam_b, 300)
+p4 <- ggplot(sol4, aes(time, I)) + geom_line(color = "#3c763d") + scale_y_log10() +
+  labs(title = sprintf("Case IIIa: R0=%.2f<1, R1=%.2f>1 -> I(t) decays", R0_b, R1_b)) +
+  theme_minimal()
+
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
+ggsave("../../chapter_02/images/varying_population_regimes_R.png",
+       plot = gridExtra::arrangeGrob(p1, p2, p3, p4, ncol = 2), width = 12, height = 9, dpi = 130)
+
+cat(sprintf("Case IIIa (R1>1): I(t_end)=%.6f (decayed from I0=%d)\n", tail(sol4$I, 1), I0))
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_02/section_2_4.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_02/exercises/section_2_4_exercises.md`; solutions:
+`../../chapter_02/solutions/section_2_4_solutions.md`.*

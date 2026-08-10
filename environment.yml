@@ -1,0 +1,15 @@
+name: mathmodeling
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - scipy>=1.11
+  - sympy>=1.12
+  - matplotlib>=3.8
+  - seaborn>=0.13
+  - pandas>=2.1
+  - plotly>=5.18
+  - jupyter
+  - notebook
+  - nbformat

@@ -1,0 +1,129 @@
+---
+title: "Chapter 1, Section 1.3 — An Example: Kermack–McKendrick Model"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 8–11. Companion to `../../python/chapter_01/section_1_3.ipynb` —
+full prose (rewrite, ELI10, key ideas, the full six-step threshold derivation, symbol table,
+intuition) is identical to that notebook; this file focuses on reproducing the code, here using
+`deSolve` for the ODE integration in place of `scipy.solve_ivp`.
+
+---
+
+## Block 2 — Recreating the explicit transfer diagram (Figure 1.2)
+
+```{r figure-1-2, fig.width=8, fig.height=2.6}
+boxes <- tibble::tibble(label = c("S", "I", "R"), x = c(1.5, 4.5, 7.5), y = 1.6)
+edges <- tibble::tibble(
+  x = c(2.1, 5.1), y = c(1.6, 1.6), xend = c(3.9, 6.9), yend = c(1.6, 1.6),
+  label = c("lambda*I*S", "gamma*I")
+)
+
+ggplot() +
+  geom_rect(data = boxes, aes(xmin = x - 0.6, xmax = x + 0.6, ymin = y - 0.6, ymax = y + 0.6),
+            fill = "#eef2f7", color = "#31708f", linewidth = 1) +
+  geom_text(data = boxes, aes(x = x, y = y, label = label), size = 6, fontface = "bold") +
+  geom_segment(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.2, "cm"))) +
+  annotate("text", x = 3, y = 2.0, label = TeX("$\\lambda I S$"), size = 5) +
+  annotate("text", x = 6, y = 2.0, label = TeX("$\\gamma I$"), size = 5) +
+  coord_cartesian(xlim = c(0, 9), ylim = c(0, 3)) +
+  theme_void() +
+  labs(title = "Figure 1.2 (recreated): Transfer diagram for the simple SIR model")
+
+ggsave("../../chapter_01/images/transfer_diagram_1_2_R.png", width = 8, height = 2.6, dpi = 130)
+```
+
+## Block 3 — Solving the Kermack–McKendrick ODEs with `deSolve`, and verifying the threshold
+
+```{r kermack-mckendrick-deSolve}
+kermack_mckendrick <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  lambda <- parms["lambda"]; gamma <- parms["gamma"]
+  dS <- -lambda * I * S
+  dI <- lambda * I * S - gamma * I
+  dR <- gamma * I
+  list(c(dS, dI, dR))
+}
+
+lambda <- 0.0005
+gamma <- 0.2
+threshold_S0 <- gamma / lambda
+cat(sprintf("Threshold value gamma/lambda = %.1f\n", threshold_S0))
+
+t_grid <- seq(0, 120, length.out = 400)
+
+run_scenario <- function(S0, I0, label) {
+  parms <- c(lambda = lambda, gamma = gamma)
+  y0 <- c(S = S0, I = I0, R = 0)
+  out <- ode(y = y0, times = t_grid, func = kermack_mckendrick, parms = parms, method = "lsoda")
+  out_df <- as.data.frame(out)
+  out_df$scenario <- label
+  out_df
+}
+
+below <- run_scenario(threshold_S0 - 150, 5, sprintf("below threshold (S0=%.0f)", threshold_S0 - 150))
+above <- run_scenario(threshold_S0 + 150, 5, sprintf("above threshold (S0=%.0f)", threshold_S0 + 150))
+
+for (df in list(below, above)) {
+  peak_I <- max(df$I)
+  cat(sprintf("%s: peak I(t) = %.1f (I0 was 5) -> %s\n",
+              unique(df$scenario), peak_I, ifelse(peak_I > 5, "GREW", "never exceeded I0")))
+}
+```
+
+```{r threshold-plot, fig.width=12, fig.height=4.5}
+combined <- bind_rows(below, above) %>%
+  pivot_longer(cols = c("S", "I", "R"), names_to = "compartment", values_to = "count")
+
+ggplot(combined, aes(x = time, y = count, color = compartment)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~scenario, scales = "free_y") +
+  scale_color_manual(values = c(S = "#31708f", I = "#a94442", R = "#3c763d")) +
+  labs(title = "Kermack–McKendrick model on both sides of the epidemic threshold",
+       x = "time", y = "number of hosts") +
+  theme_minimal()
+
+ggsave("../../chapter_01/images/threshold_verification_R.png", width = 12, height = 4.5, dpi = 130)
+```
+
+```{r verification}
+# Verification (b): S(t) should be non-increasing
+S_vals <- above$S
+diffs <- diff(S_vals)
+cat("Max increase in S(t) between consecutive time points:", max(diffs), "\n")
+cat(ifelse(max(diffs) <= 1e-6, "PASS: S(t) never increases\n", "FAIL\n"))
+
+# Verification (a): N(t) = S+I+R should stay constant
+N_vals <- above$S + above$I + above$R
+cat(sprintf("N(0) = %.6f, N(t_end) = %.6f, max deviation = %.2e\n",
+            N_vals[1], N_vals[length(N_vals)], max(abs(N_vals - N_vals[1]))))
+```
+
+**Reading the output:** same conclusion as the Python/`scipy.solve_ivp` version — `deSolve`'s
+`lsoda` integrator (an adaptive-step solver, well suited to equations like this one) confirms both
+provable properties (constant $N(t)$, non-increasing $S(t)$) to within numerical tolerance, and
+reproduces the sharp qualitative difference between the two threshold scenarios.
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_01/section_1_3.ipynb` — see that notebook for the full text
+(summary, memory aids, connections are language-independent by design).
+
+*Practice problems: `../../chapter_01/exercises/section_1_3_exercises.md`; solutions:
+`../../chapter_01/solutions/section_1_3_solutions.md`.*

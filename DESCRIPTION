@@ -1,0 +1,21 @@
+Package: MathematicalModelingStudy
+Title: Companion Code for An Introduction to Mathematical Modeling of Infectious Diseases (Li, 2018)
+Version: 0.1.0
+Description: R Markdown companion notebooks implementing every model, derivation, and
+    exercise from Michael Y. Li's "An Introduction to Mathematical Modeling of Infectious
+    Diseases" (Springer, 2018), built section by section.
+Depends: R (>= 4.2)
+Imports:
+    ggplot2,
+    dplyr,
+    tidyr,
+    deSolve,
+    pracma,
+    plotly,
+    latex2exp,
+    rmarkdown,
+    minpack.lm,
+    knitr
+License: MIT
+Encoding: UTF-8
+RoxygenNote: 7.3.1

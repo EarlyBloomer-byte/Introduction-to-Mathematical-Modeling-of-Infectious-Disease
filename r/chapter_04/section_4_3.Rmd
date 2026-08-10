@@ -1,0 +1,158 @@
+---
+title: "Chapter 4, Section 4.3 — Parameter Estimation for Epidemic Models"
+author: "Mathematical Modeling Study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pracma)
+library(latex2exp)
+library(deSolve)
+```
+
+**Source:** Li, M.Y. (2018), pp. 118–124. Companion to `../../python/chapter_04/section_4_3.ipynb`
+— full prose (rewrite, ELI10, key ideas, derivations, symbol tables, intuition) is identical to
+that notebook; this file reproduces the code in R. As in the Python notebook, we use `lsoda`
+(deSolve's stiffness-aware method) rather than a plain explicit Runge-Kutta method, since the
+optimizer's search visits parameter regions where the ODE becomes numerically stiff.
+
+---
+
+## Generating synthetic noisy data
+
+```{r generate-data}
+sir_model <- function(t, y, parms) {
+  S <- y["S"]; I <- y["I"]; R <- y["R"]
+  lam <- parms["lam"]; gamma_ <- parms["gamma_"]
+  list(c(-lam*I*S, lam*I*S - gamma_*I, gamma_*I))
+}
+
+sir_solve <- function(par, IC, t_eval) {
+  lam <- par[1]; gamma_ <- par[2]
+  t_sorted <- sort(t_eval)
+  out <- ode(y = c(S=IC[1], I=IC[2], R=IC[3]), times = t_sorted, func = sir_model,
+             parms = c(lam=lam, gamma_=gamma_), method = "lsoda", rtol = 1e-6, atol = 1e-6)
+  out_df <- as.data.frame(out)
+  # interpolate back onto the (possibly unsorted) originally-requested t_eval
+  data.frame(
+    S = approx(out_df$time, out_df$S, xout = t_eval)$y,
+    I = approx(out_df$time, out_df$I, xout = t_eval)$y,
+    R = approx(out_df$time, out_df$R, xout = t_eval)$y
+  )
+}
+
+set.seed(42)
+numpts <- 20
+t_data <- c(0, sort(20 * runif(numpts)))
+IC <- c(50, 1, 0)
+lam_true <- 0.01; gamma_true <- 0.1
+
+true_solution <- sir_solve(c(lam_true, gamma_true), IC, t_data)
+width <- 0.1
+noise <- matrix(20 * rnorm(3 * length(t_data), sd = width), nrow = length(t_data))
+noise[1, ] <- 0  # no noise at t=0
+
+SIR_data_full <- true_solution + noise
+I_data <- SIR_data_full$I
+N_data <- rowSums(SIR_data_full)
+```
+
+## Fitting: a single run from the book's suggested starting guess
+
+```{r single-fit}
+sir_par_sol <- function(par, t) {
+  full <- sir_solve(par, IC, t)
+  data.frame(I = full$I, N = rowSums(full))
+}
+
+sum_squares_sir <- function(par) {
+  if (par[1] <= 0 || par[2] <= 0) return(1e12)
+  pred <- sir_par_sol(par, t_data)
+  sum((pred$I - I_data)^2) + sum((pred$N - N_data)^2)
+}
+
+initial_guess <- c(8, 0.02)
+cat(sprintf("SSE at the deliberately bad initial guess: %.2f\n", sum_squares_sir(initial_guess)))
+
+res_single <- optim(initial_guess, sum_squares_sir, method = "Nelder-Mead",
+                     control = list(maxit = 5000, reltol = 1e-10))
+cat(sprintf("Fitted (single run): lambda=%.4f, gamma=%.5f, SSE=%.4f\n",
+            res_single$par[1], res_single$par[2], res_single$value))
+cat(sprintf("SSE at the TRUE parameters, for comparison: %.4f\n", sum_squares_sir(c(lam_true, gamma_true))))
+```
+
+## Multi-start search (the fix)
+
+```{r multi-start}
+starting_guesses <- list(c(8,0.02), c(0.5,0.5), c(0.05,0.05), c(1,1), c(0.02,0.2), c(0.1,0.1))
+
+best_result <- NULL
+for (start in starting_guesses) {
+  res <- optim(start, sum_squares_sir, method = "Nelder-Mead", control = list(maxit = 3000, reltol = 1e-10))
+  cat(sprintf("start=(%.3f,%.3f) -> fitted=(%.5f,%.5f), SSE=%.3f\n",
+              start[1], start[2], res$par[1], res$par[2], res$value))
+  if (is.null(best_result) || res$value < best_result$value) best_result <- res
+}
+lam_hat <- best_result$par[1]; gamma_hat <- best_result$par[2]
+cat(sprintf("\nBest result: lambda=%.5f, gamma=%.5f, SSE=%.3f\n", lam_hat, gamma_hat, best_result$value))
+cat(sprintf("True parameters: lambda=%.2f, gamma=%.2f\n", lam_true, gamma_true))
+```
+
+## Visualizing the fit
+
+```{r plot-fit, fig.width=8, fig.height=5}
+t_smooth <- seq(0, max(t_data), length.out = 300)
+fitted_curve <- sir_par_sol(c(lam_hat, gamma_hat), t_smooth)
+
+ggplot() +
+  geom_point(data = tibble(t=t_data, I=I_data, N=N_data), aes(t, I), color = "#a94442") +
+  geom_point(data = tibble(t=t_data, N=N_data), aes(t, N), color = "#31708f") +
+  geom_line(data = tibble(t=t_smooth, I=fitted_curve$I), aes(t, I), color = "#a94442", linetype = "dashed") +
+  geom_line(data = tibble(t=t_smooth, N=fitted_curve$N), aes(t, N), color = "#31708f", linetype = "dashed") +
+  labs(title = "Figure 4.6 (recreated): fitted curves vs. data", y = "count") +
+  theme_minimal()
+
+ggsave("../../chapter_04/images/sir_fit_vs_data_R.png", width = 8, height = 5, dpi = 130)
+```
+
+## Exercise 2: fitting with only I(t)
+
+```{r i-only-fit}
+sum_squares_sir_I_only <- function(par) {
+  if (par[1] <= 0 || par[2] <= 0) return(1e12)
+  pred <- sir_par_sol(par, t_data)
+  sum((pred$I - I_data)^2)
+}
+
+best_I_only <- NULL
+for (start in starting_guesses) {
+  res <- optim(start, sum_squares_sir_I_only, method = "Nelder-Mead", control = list(maxit = 3000, reltol = 1e-10))
+  if (is.null(best_I_only) || res$value < best_I_only$value) best_I_only <- res
+}
+cat(sprintf("Fitting with BOTH I(t) and N(t): lambda=%.5f, gamma=%.5f\n", lam_hat, gamma_hat))
+cat(sprintf("Fitting with ONLY I(t):          lambda=%.5f, gamma=%.5f\n", best_I_only$par[1], best_I_only$par[2]))
+cat("These converge to essentially the SAME answer -- because this demography-free SIR model\n")
+cat("has dN/dt = 0 exactly (proven in Sec. 1.3/2.1), so N(t) data carries no information about\n")
+cat("lambda, gamma at all -- not a general property of adding more observables.\n")
+```
+
+## Summary / Memory Aids / Connections
+
+Identical to `../../python/chapter_04/section_4_3.ipynb` — see that notebook for the full text.
+
+*Practice problems: `../../chapter_04/exercises/section_4_3_exercises.md`; solutions:
+`../../chapter_04/solutions/section_4_3_solutions.md`.*
+
+---
+
+# Chapter 4 Complete
+
+All three sections are now built, executed, and verified end to end.
