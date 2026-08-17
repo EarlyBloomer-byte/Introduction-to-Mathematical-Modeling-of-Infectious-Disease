@@ -117,27 +117,27 @@ numerical bugs (mislabeled parameter regimes, a stiff-ODE solver hang, a spuriou
 minimum, a mistranscribed closed-form formula) that were caught, diagnosed, and fixed along the
 way rather than papered over.
 
-| Chapter | Section | Status |
+| Chapter | Section |
 |---|---|---|
-| 1 | 1.1 Mathematical Modeling of Infectious Diseases: Issues and Approaches | ✅ done |
-| 1 | 1.2 Deterministic Epidemic Models: Compartmental Approach | ✅ done |
-| 1 | 1.3 An Example: Kermack–McKendrick Model | ✅ done |
-| 1 | 1.4 Important Concepts in Compartmental Epidemic Models | ✅ done |
-| 2 | 2.1 Kermack-McKendrick (detailed) | ✅ done |
-| 2 | 2.2 SIS model | ✅ done |
-| 2 | 2.3 model with demography | ✅ done |
-| 2 | 2.4 varying population (homogeneous systems) | ✅ done |
-| 2 | 2.5 Ross-MacDonald malaria model | ✅ done |
-| 3 | 3.1-3.2 stability definitions + linearization | ✅ done |
-| 3 | 3.3 Lyapunov functions + LaSalle | ✅ done |
-| 3 | 3.4 Floquet theory | ✅ done |
-| 3 | 3.5-3.6 phase-line/phase-plane, Poincare-Bendixson | ✅ done |
-| 3 | 3.7-3.8 uniform persistence + Metzler/monotone systems | ✅ done |
-| 4 | 4.1 linear least squares | ✅ done |
-| 4 | 4.2 nonlinear least squares (Gauss-Newton) | ✅ done |
-| 4 | 4.3 epidemic parameter estimation | ✅ done |
-| 5 | 5.1 SEIR models | ✅ done |
-| 5 | 5.2 in-host models, backward bifurcation | ✅ done |
+| 1 | 1.1 Mathematical Modeling of Infectious Diseases: Issues and Approaches |
+| 1 | 1.2 Deterministic Epidemic Models: Compartmental Approach |
+| 1 | 1.3 An Example: Kermack–McKendrick Model |
+| 1 | 1.4 Important Concepts in Compartmental Epidemic Models |
+| 2 | 2.1 Kermack-McKendrick (detailed) |
+| 2 | 2.2 SIS model |
+| 2 | 2.3 model with demography |
+| 2 | 2.4 varying population (homogeneous systems) |
+| 2 | 2.5 Ross-MacDonald malaria model |
+| 3 | 3.1-3.2 stability definitions + linearization |
+| 3 | 3.3 Lyapunov functions + LaSalle |
+| 3 | 3.4 Floquet theory |
+| 3 | 3.5-3.6 phase-line/phase-plane, Poincare-Bendixson |
+| 3 | 3.7-3.8 uniform persistence + Metzler/monotone systems |
+| 4 | 4.1 linear least squares |
+| 4 | 4.2 nonlinear least squares (Gauss-Newton) |
+| 4 | 4.3 epidemic parameter estimation |
+| 5 | 5.1 SEIR models |
+| 5 | 5.2 in-host models, backward bifurcation |
 
 ## Dependencies
 
