@@ -40,7 +40,7 @@ geography, we call the resulting spread an **outbreak**, **epidemic**, **endemic
 **pandemic** (the book's example: the 1918 Spanish flu, which killed over 50 million people
 across every continent).
 
-### Explain Like I'm 10
+### Simplified
 
 Same rumor-at-school story as the Python notebook: an outbreak is more kids than usual hearing it
 suddenly; an epidemic is it ripping through the whole school fast; endemic is it never quite going
