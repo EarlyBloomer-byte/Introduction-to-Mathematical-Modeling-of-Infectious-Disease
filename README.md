@@ -31,7 +31,7 @@ By working through this repository you should be able to:
 ```
 Mathematical_Modeling_Study/
 │
-├── README.md                  <- you are here
+├── README.md                  
 ├── LICENSE
 ├── requirements.txt            <- Python dependencies (pip)
 ├── environment.yml             <- Python dependencies (conda)
@@ -107,15 +107,8 @@ R Markdown files knit from RStudio (Knit button) or from the command line:
 rmarkdown::render("r/chapter_01/section_1_1.Rmd")
 ```
 
-## Progress Tracker
+## Contents
 
-**Status: COMPLETE.** All 5 chapters, 19 sections, from 1.1 through 5.2, are done — the entire
-textbook has been rewritten, derived from first principles, explained intuitively, visualized,
-implemented in both Python and R, numerically verified, and equipped with practice problems and
-full worked solutions. See `docs/PROGRESS.md` for the full build log, including several real
-numerical bugs (mislabeled parameter regimes, a stiff-ODE solver hang, a spurious optimizer local
-minimum, a mistranscribed closed-form formula) that were caught, diagnosed, and fixed along the
-way rather than papered over.
 
 | Chapter | Section / Topic |
 |---|---|
