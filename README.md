@@ -117,8 +117,8 @@ numerical bugs (mislabeled parameter regimes, a stiff-ODE solver hang, a spuriou
 minimum, a mistranscribed closed-form formula) that were caught, diagnosed, and fixed along the
 way rather than papered over.
 
-| Chapter | Section |
-|---|---|---|
+| Chapter | Section / Topic |
+|---|---|
 | 1 | 1.1 Mathematical Modeling of Infectious Diseases: Issues and Approaches |
 | 1 | 1.2 Deterministic Epidemic Models: Compartmental Approach |
 | 1 | 1.3 An Example: Kermack–McKendrick Model |
