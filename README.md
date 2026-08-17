@@ -40,7 +40,6 @@ Mathematical_Modeling_Study/
 │
 ├── data/                       <- any datasets used for parameter estimation (Ch. 4)
 ├── figures/                    <- shared/cross-chapter figures
-├── docs/                       <- rendered notes / progress tracker
 ├── references/                 <- citation info, further reading
 │
 ├── python/                      <- ALL Jupyter notebooks, organized by chapter
