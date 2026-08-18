@@ -1,6 +1,6 @@
 # Chapter 1 — Important Concepts in Mathematical Modeling of Infectious Diseases
 
-Source: Li (2018), pp. 1–33. **Status: COMPLETE (4/4 sections).**
+Source: Li (2018), pp. 1–33.
 
 | Section | Title |
 |---|---|
