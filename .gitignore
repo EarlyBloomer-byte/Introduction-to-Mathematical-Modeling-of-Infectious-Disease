@@ -22,3 +22,6 @@ Thumbs.db
 *.html
 !docs/*.html
 docs/
+
+# pdf
+*.pdf
