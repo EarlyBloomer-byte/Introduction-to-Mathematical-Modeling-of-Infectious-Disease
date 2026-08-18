@@ -4,10 +4,12 @@ A from-scratch, no-prior-knowledge-assumed study companion to:
 
 > Michael Y. Li, **An Introduction to Mathematical Modeling of Infectious Diseases**, Springer, Mathematics of Planet Earth series, 2018. ISBN 978-3-319-72121-7 (print) / 978-3-319-72122-4 (eBook). https://doi.org/10.1007/978-3-319-72122-4
 
+**This work is in Progress**
+
 ## Overview
 
 This repository works through the book **sequentially, subsection by subsection**. For each
-subsection you get, per paragraph: a plain-English rewrite, an "explain it to a 10-year-old"
+subsection you get, per paragraph: a plain-English rewrite, and a "Simplified"
 version, the list of key ideas, a full step-by-step derivation of every formula, a symbol-by-symbol
 glossary, the "why does this equation exist" intuition, a visualization, a working Python
 implementation, an equivalent R implementation, numerical verification, and practice problems
